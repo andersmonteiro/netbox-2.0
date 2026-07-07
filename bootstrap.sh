@@ -14,7 +14,13 @@
 #   3. Clona este template (se ainda não estiver rodando de dentro dele)
 #   4. Roda o setup.sh (clona o netbox-docker oficial + aplica o overlay)
 #   5. Gera senha/token do superusuário automaticamente (se ainda forem
-#      os valores de exemplo) e sobe a stack com docker compose
+#      os valores de exemplo), builda a imagem e sobe a stack
+#   6. AGUARDA o NetBox ficar "healthy" antes de imprimir as credenciais
+#      finais — a primeira subida roda uma leva grande de migrations e
+#      pode levar vários minutos; sem essa espera o `docker compose up`
+#      pode retornar erro de dependência antes de tudo terminar de subir
+#      (o container continua subindo em segundo plano mesmo assim, só
+#      o script antigo desistia cedo demais de esperar).
 #
 # Testado em Ubuntu/Debian. Em outras distros, os passos 1-2 podem
 # precisar de ajuste manual (o script avisa e continua mesmo assim).
@@ -48,7 +54,7 @@ CURRENT_USER="${SUDO_USER:-$USER}"
 # --------------------------------------------------------------------
 # 1. Dependências de sistema
 # --------------------------------------------------------------------
-log "1/5 Detectando sistema e instalando dependências básicas..."
+log "1/6 Detectando sistema e instalando dependências básicas..."
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "${ID:-}" in
@@ -69,7 +75,7 @@ fi
 # --------------------------------------------------------------------
 # 2. Docker Engine + Compose plugin
 # --------------------------------------------------------------------
-log "2/5 Verificando Docker..."
+log "2/6 Verificando Docker..."
 if ! command -v docker >/dev/null 2>&1; then
     echo "    Docker não encontrado, instalando via script oficial (get.docker.com)..."
     curl -fsSL https://get.docker.com | $SUDO sh
@@ -92,7 +98,7 @@ fi
 # --------------------------------------------------------------------
 # 3. Garantir que temos o template localmente
 # --------------------------------------------------------------------
-log "3/5 Localizando/obtendo o template..."
+log "3/6 Localizando/obtendo o template..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/setup.sh" ] && [ -f "$SCRIPT_DIR/docker-compose.override.yml" ]; then
     echo "    Já estamos dentro do template ($SCRIPT_DIR), usando esta pasta."
@@ -115,7 +121,7 @@ chmod +x setup.sh bootstrap.sh 2>/dev/null || true
 # --------------------------------------------------------------------
 # 4. setup.sh: clona netbox-docker oficial + aplica overlay + cria .env
 # --------------------------------------------------------------------
-log "4/5 Preparando a stack (netbox-docker oficial + overlay deste template)..."
+log "4/6 Preparando a stack (netbox-docker oficial + overlay deste template)..."
 ./setup.sh
 
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
@@ -134,10 +140,47 @@ if grep -q "troque-este-token-de-40-caracteres" "$ENV_FILE" 2>/dev/null; then
 fi
 
 # --------------------------------------------------------------------
-# 5. Sobe a stack
+# 5. Build da imagem e subida da stack
 # --------------------------------------------------------------------
-log "5/5 Build + up da stack (isso pode levar alguns minutos na primeira vez)..."
-(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache && docker compose up -d)
+log "5/6 Build da imagem (com plugins)..."
+(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache)
+
+log "6/6 Subindo a stack..."
+# Não deixamos o "set -e" abortar aqui: na primeira subida o compose
+# pode retornar erro porque o netbox ainda não ficou "healthy" dentro
+# do tempo que ele espera por padrão -- isso NÃO significa que quebrou,
+# só que ainda está migrando o banco. A gente espera de verdade abaixo.
+(cd "$REPO_DIR/netbox-docker" && docker compose up -d) || true
+
+NETBOX_CID="$(cd "$REPO_DIR/netbox-docker" && docker compose ps -q netbox 2>/dev/null)"
+if [ -z "$NETBOX_CID" ]; then
+    warn "Não encontrei o container do netbox rodando. Confira manualmente com:
+    cd $REPO_DIR/netbox-docker && docker compose ps && docker compose logs netbox"
+else
+    echo "    Aguardando o NetBox ficar saudável (1ª subida = muitas migrations, pode levar vários minutos)..."
+    WAITED=0
+    MAX_WAIT=1200   # 20 minutos
+    while true; do
+        STATUS="$(docker inspect --format='{{.State.Health.Status}}' "$NETBOX_CID" 2>/dev/null || echo unknown)"
+        if [ "$STATUS" = "healthy" ]; then
+            echo "    NetBox healthy depois de ${WAITED}s."
+            break
+        fi
+        if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+            warn "NetBox não ficou 'healthy' em $((MAX_WAIT/60)) minutos (status atual: $STATUS).
+    Vou continuar mesmo assim -- acompanhe com: docker logs -f $NETBOX_CID"
+            break
+        fi
+        sleep 10
+        WAITED=$((WAITED+10))
+        echo "    ... ainda subindo (${WAITED}s, status atual: $STATUS)"
+    done
+
+    # Agora que o netbox está de pé (ou desistimos de esperar), sobe o
+    # que ficou pra trás -- netbox-worker/netbox-housekeeping dependem
+    # do netbox estar saudável pra iniciar.
+    (cd "$REPO_DIR/netbox-docker" && docker compose up -d) || warn "docker compose up -d retornou erro na segunda tentativa. Confira com: cd $REPO_DIR/netbox-docker && docker compose ps"
+fi
 
 SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 cat <<EOF
