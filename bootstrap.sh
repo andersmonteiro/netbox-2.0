@@ -99,14 +99,27 @@ fi
 # 3. Garantir que temos o template localmente
 # --------------------------------------------------------------------
 log "3/6 Localizando/obtendo o template..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Quando rodado via "curl | bash" não existe arquivo de script real,
+# então BASH_SOURCE[0] vem vazio -- com "set -u" isso quebraria sem o
+# ":-" abaixo. Nesse caso SCRIPT_DIR cai pro diretório atual (ex:
+# /root), que não tem setup.sh, então a lógica abaixo corretamente
+# segue pro branch de clone/atualização em INSTALL_DIR.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || pwd)"
 if [ -f "$SCRIPT_DIR/setup.sh" ] && [ -f "$SCRIPT_DIR/docker-compose.override.yml" ]; then
     echo "    Já estamos dentro do template ($SCRIPT_DIR), usando esta pasta."
     REPO_DIR="$SCRIPT_DIR"
 else
     if [ -d "$INSTALL_DIR/.git" ]; then
-        echo "    $INSTALL_DIR já existe, atualizando (git pull)..."
-        git -C "$INSTALL_DIR" pull
+        echo "    $INSTALL_DIR já existe, sincronizando com o repositório remoto..."
+        # Usamos fetch + reset --hard (não "git pull") de propósito: uma
+        # rodada anterior pode ter dado chmod +x nos scripts, o que o
+        # git enxerga como alteração local e bloquearia um merge normal.
+        # Esta pasta é só um espelho do template -- customização de
+        # cliente de verdade vive fora do git (.env, netbox-docker/,
+        # que já estão no .gitignore e não são tocados por isso).
+        git -C "$INSTALL_DIR" fetch --quiet origin
+        DEFAULT_BRANCH="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+        git -C "$INSTALL_DIR" reset --hard "origin/${DEFAULT_BRANCH}"
     else
         echo "    Clonando $TEMPLATE_REPO_URL para $INSTALL_DIR"
         $SUDO mkdir -p "$(dirname "$INSTALL_DIR")"
