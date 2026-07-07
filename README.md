@@ -65,6 +65,23 @@ curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/boot
 No final ele imprime a URL, usuário, senha e token gerados — anote na
 hora, não aparecem de novo.
 
+**Usando uma senha/token fixos (ex: padrão da empresa)**: por padrão a
+senha e os tokens são gerados aleatoriamente a cada instalação — o
+repositório público nunca tem um valor fixo real. Se você quiser usar
+sempre a mesma credencial de produção em todos os clientes, exporte as
+variáveis antes do curl (elas ficam só no seu terminal/onde você
+guardar o comando, nunca no git):
+
+```bash
+export SUPERUSER_PASSWORD='sua-senha-de-verdade'
+export SUPERUSER_API_TOKEN='seu-token-fixo-de-40-hex'   # ex: openssl rand -hex 20
+export SUPERUSER_API_KEY='sua-key-fixa-de-32-hex'       # ex: openssl rand -hex 16
+curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
+```
+
+Se alguma dessas variáveis não for definida, o bootstrap continua
+gerando aleatoriamente só a que faltar.
+
 Esse comando só funciona porque o repositório é **público** (sem
 segredo nenhum nele — ver seção 7); a VM do cliente não precisa de
 nenhuma credencial de GitHub pra isso.

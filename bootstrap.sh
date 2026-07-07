@@ -26,8 +26,13 @@
 # precisar de ajuste manual (o script avisa e continua mesmo assim).
 #
 # Variáveis de ambiente opcionais:
-#   TEMPLATE_REPO_URL  -> default: https://github.com/andersmonteiro/netbox-2.0.git
-#   INSTALL_DIR        -> default: /opt/netbox-2.0
+#   TEMPLATE_REPO_URL   -> default: https://github.com/andersmonteiro/netbox-2.0.git
+#   INSTALL_DIR         -> default: /opt/netbox-2.0
+#   SUPERUSER_PASSWORD  -> default: gera senha aleatória. Exporte pra usar
+#                          uma senha fixa (ex: padrão da empresa) sem
+#                          nunca commitar ela no repositório público.
+#   SUPERUSER_API_TOKEN -> default: gera token aleatório (hex 40 chars).
+#   SUPERUSER_API_KEY   -> default: gera key aleatória (hex 32 chars).
 # ==========================================================================
 set -euo pipefail
 
@@ -139,23 +144,53 @@ log "4/6 Preparando a stack (netbox-docker oficial + overlay deste template)..."
 
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
 
-# Gera automaticamente senha/token se ainda estiverem com o valor de
-# exemplo (evita subir em produção com credencial padrão previsível).
+# --------------------------------------------------------------------
+# Preenche senha/token/key do superusuário.
+#
+# Por padrão GERA VALORES ALEATÓRIOS (evita credencial previsível em
+# produção -- este template é público no GitHub, então nunca colocamos
+# um valor fixo real em .env.example).
+#
+# Se você quiser usar uma senha/token FIXOS (ex: padrão da sua empresa
+# pra facilitar acesso em vários clientes), exporte as variáveis ANTES
+# de rodar o curl -- elas nunca tocam o repositório, ficam só na sua
+# sessão/onde você guardar o comando:
+#
+#   export SUPERUSER_PASSWORD='sua-senha-de-verdade'
+#   export SUPERUSER_API_TOKEN='seu-token-fixo-de-40-hex'
+#   export SUPERUSER_API_KEY='sua-key-fixa-de-32-hex'
+#   curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
+# --------------------------------------------------------------------
 if grep -q "troque-esta-senha" "$ENV_FILE" 2>/dev/null; then
-    NEW_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')"
-    sed -i "s|SUPERUSER_PASSWORD=troque-esta-senha|SUPERUSER_PASSWORD=${NEW_PASSWORD}|" "$ENV_FILE"
+    if [ -n "${SUPERUSER_PASSWORD:-}" ]; then
+        FINAL_PASSWORD="$SUPERUSER_PASSWORD"
+        echo "    Usando SUPERUSER_PASSWORD fornecido via variável de ambiente."
+    else
+        FINAL_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')"
+    fi
+    sed -i "s|SUPERUSER_PASSWORD=troque-esta-senha|SUPERUSER_PASSWORD=${FINAL_PASSWORD}|" "$ENV_FILE"
 fi
 if grep -q "troque-este-token-de-40-caracteres" "$ENV_FILE" 2>/dev/null; then
-    NEW_TOKEN="$(openssl rand -hex 20)"
-    sed -i "s|SUPERUSER_API_TOKEN=troque-este-token-de-40-caracteres|SUPERUSER_API_TOKEN=${NEW_TOKEN}|" "$ENV_FILE"
-    sed -i "s|NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|NETBOX_TOKEN=${NEW_TOKEN}|" "$ENV_FILE"
-    sed -i "s|MCP_NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|MCP_NETBOX_TOKEN=${NEW_TOKEN}|" "$ENV_FILE"
+    if [ -n "${SUPERUSER_API_TOKEN:-}" ]; then
+        FINAL_TOKEN="$SUPERUSER_API_TOKEN"
+        echo "    Usando SUPERUSER_API_TOKEN fornecido via variável de ambiente."
+    else
+        FINAL_TOKEN="$(openssl rand -hex 20)"
+    fi
+    sed -i "s|SUPERUSER_API_TOKEN=troque-este-token-de-40-caracteres|SUPERUSER_API_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
+    sed -i "s|NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
+    sed -i "s|MCP_NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|MCP_NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
 fi
 # A partir do NetBox 4.3 (token de API "v2"), SUPERUSER_API_TOKEN sozinho
 # não cria o token -- precisa também de SUPERUSER_API_KEY.
 if grep -q "troque-esta-chave-de-32-caracteres" "$ENV_FILE" 2>/dev/null; then
-    NEW_API_KEY="$(openssl rand -hex 16)"
-    sed -i "s|SUPERUSER_API_KEY=troque-esta-chave-de-32-caracteres|SUPERUSER_API_KEY=${NEW_API_KEY}|" "$ENV_FILE"
+    if [ -n "${SUPERUSER_API_KEY:-}" ]; then
+        FINAL_API_KEY="$SUPERUSER_API_KEY"
+        echo "    Usando SUPERUSER_API_KEY fornecido via variável de ambiente."
+    else
+        FINAL_API_KEY="$(openssl rand -hex 16)"
+    fi
+    sed -i "s|SUPERUSER_API_KEY=troque-esta-chave-de-32-caracteres|SUPERUSER_API_KEY=${FINAL_API_KEY}|" "$ENV_FILE"
 fi
 
 # --------------------------------------------------------------------
