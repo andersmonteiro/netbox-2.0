@@ -5,7 +5,8 @@
 
 PLUGINS = [
     "netbox_diode_plugin",
-    # "netbox_topology_views",
+    "netbox_topology_views",
+    "netbox_qrcode",
     # "netbox_inventory",
 ]
 
@@ -25,4 +26,16 @@ PLUGINS_CONFIG = {
         # em texto plano em produção.
         "netbox_to_diode_client_secret": "PREENCHER_APOS_QUICKSTART_DIODE",
     },
+
+    "netbox_topology_views": {
+        "static_image_directory": "netbox_topology_views/img",
+        # Permite salvar a posição dos ícones arrastados na tela de
+        # topologia (fica só em memória/local até habilitar isso).
+        "allow_coordinates_saving": True,
+        "always_save_coordinates": True,
+    },
+
+    # netbox_qrcode não tem PLUGINS_CONFIG obrigatório; o layout da
+    # etiqueta é customizado depois, pela própria interface do NetBox
+    # (Admin > QR Code Label Config).
 }

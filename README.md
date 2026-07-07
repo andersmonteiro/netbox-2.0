@@ -6,9 +6,16 @@ Zabbix e com agentes de IA (via MCP).
 
 Este projeto **não reinventa** o docker-compose oficial do NetBox — ele
 estende o repositório oficial [`netbox-community/netbox-docker`](https://github.com/netbox-community/netbox-docker)
-(branch `release`, sempre na última versão estável compatível com
-plugins) via `docker-compose.override.yml`. Assim você continua
-recebendo atualizações de segurança com um simples `git pull`.
+(branch `release`) via `docker-compose.override.yml`.
+
+**Sobre a versão do NetBox:** a imagem é fixada em `v4.5.10` (não
+`latest`) por causa de compatibilidade de plugin — ver a seção
+"Versão do NetBox e compatibilidade de plugins" mais abaixo antes de
+mudar isso.
+
+Plugins incluídos: **netbox-topology-views** (mapa de topologia),
+**netbox-qrcode** (QR Code pra etiqueta física de device/rack/cabo) e
+**netbox_diode_plugin** (ingestão via Diode/Orb Agent).
 
 ## Estrutura deste repositório
 
@@ -28,9 +35,11 @@ netbox-2.0/
 │   ├── requirements.txt
 │   ├── import_csv_to_netbox.py     <- importação em massa (CSV/XLSX)
 │   ├── napalm_collect.py           <- coleta via SSH/API (NAPALM)
-│   └── discover_network.py         <- descoberta de rede (nmap)
-└── zabbix-sync/
-    └── config.py                   <- config do netbox-zabbix-sync
+│   └── discover_network.py         <- descoberta de rede (nmap, fallback)
+├── zabbix-sync/
+│   └── config.py                   <- config do netbox-zabbix-sync
+└── orb-agent/
+    └── agent.yaml.example          <- descoberta de rede oficial (via Diode)
 ```
 
 Este é um **repositório template**: nada aqui tem dado de cliente
@@ -88,9 +97,52 @@ housekeeping, o **netbox-zabbix-sync** e o **netbox-mcp-server** — todos
 definidos no `docker-compose.override.yml`.
 
 Requisitos: Docker ≥ 20.10.10 e Docker Compose ≥ 1.28 no servidor
-(qualquer Linux). A imagem `netboxcommunity/netbox:latest` usada como
-base é reconstruída ~a cada 24h pela comunidade e sempre aponta para a
-última versão estável do NetBox.
+(qualquer Linux).
+
+### Versão do NetBox e compatibilidade de plugins
+
+A imagem base é `netboxcommunity/netbox:v4.5.10` (ver `Dockerfile-Plugins`),
+**não** `latest`. Isso foi decisão consciente, não esquecimento:
+
+- `netbox-topology-views` (mapa de topologia) hoje só declara suporte
+  até NetBox 4.5.X. Não existe release compatível com a linha 4.6
+  ainda — se a imagem usasse `latest` (hoje = v4.6.3), o build passa
+  mas o plugin quebra/some da interface em runtime.
+- `v4.5.10` (05/05/2026) foi o **último patch da série 4.5**. A série
+  4.6 saiu no dia seguinte e já recebeu 3 patches próprios desde então
+  (4.6.1, 4.6.2, 4.6.3) sem nenhum backport pra 4.5.x — é o padrão
+  normal do NetBox: quando sai uma minor nova, o bugfix migra pra ela
+  e a anterior para de receber patch. Na prática, a série 4.5 está
+  congelada: não existe mais "ficar em 4.5.x e receber atualização
+  automática" — por isso fixamos o número exato (`v4.5.10`) em vez da
+  tag flutuante `v4.5`, pra deixar isso explícito.
+
+**Risco que isso implica:** se aparecer uma falha de segurança na
+série 4.5, não deve vir patch pra ela. Se isso acontecer, as opções
+são: (a) confirmar se o `netbox-topology-views` já suporta 4.6 e fazer
+o bump completo (tabela abaixo), (b) remover o `netbox-topology-views`
+temporariamente e subir pra 4.6, ou (c) aceitar o risco por um tempo
+controlado. Vale checar esporadicamente se saiu uma versão nova do
+plugin, mesmo sem estar planejando upgrade.
+
+Tabela de compatibilidade dos plugins deste template, hoje (NetBox 4.5.x):
+
+| Plugin | Versão pinada | Compatível com 4.5.x | Compatível com 4.6.x |
+| --- | --- | --- | --- |
+| netbox_diode_plugin | 1.7.0 | Sim | Não (precisa 1.12.0) |
+| netbox-topology-views | 4.5.1 | Sim | Não (sem release ainda) |
+| netbox-qrcode | 0.0.20 | Sim | Não (precisa 0.0.21) |
+
+**Como fazer upgrade pra NetBox 4.6+ no futuro:** confira se
+`netbox-topology-views` já lançou versão pra 4.6 (é normalmente o
+gargalo — os outros dois já têm release pronta pra 4.6). Se sim,
+atualize os três pins em `plugin_requirements.txt` junto com o
+`FROM netboxcommunity/netbox:v4.6.X` (use o número exato do patch mais
+recente da série 4.6 nessa hora, pelo mesmo motivo acima) no
+`Dockerfile-Plugins` **na mesma mudança**, e rode
+`docker compose build --no-cache` num ambiente de teste antes de
+aplicar em cliente. Nunca mude só a versão do NetBox sem checar essa
+tabela primeiro.
 
 ## 2. Automações de preenchimento
 
@@ -147,12 +199,14 @@ faz um ping sweep com `nmap` e cria IPs no NetBox com a tag
 python discover_network.py 10.0.0.0/24 --site "Matriz"
 ```
 
-**Opção oficial e mais robusta — Diode + orb-agent (NetBox Labs):**
-é o produto oficial da NetBox Labs para isso, com reconciliação de
-dados e suporte a múltiplos protocolos (SSH, SNMP, ICMP). Já deixei o
-plugin `netbox_diode_plugin` no `plugin_requirements.txt` para você não
-precisar rebuildar a imagem depois. Para subir o servidor Diode
-(stack própria, separada do NetBox):
+**Opção oficial e mais robusta — Diode + Orb Agent (NetBox Labs):**
+é o produto oficial da NetBox Labs pra isso, com reconciliação de
+dados e suporte a múltiplos protocolos (SSH/NAPALM, SNMP, ping/porta).
+Já deixei o plugin `netbox_diode_plugin` no `plugin_requirements.txt`
+(pinado na versão 1.7.0, compatível com NetBox 4.5.x) pra você não
+precisar rebuildar a imagem depois.
+
+Passo 1 — subir o servidor Diode (stack própria, separada do NetBox):
 
 ```bash
 mkdir /opt/diode && cd /opt/diode
@@ -162,16 +216,46 @@ chmod +x quickstart.sh
 docker compose up -d
 ```
 
-O script gera as credenciais OAuth2; pegue o `client_secret` do cliente
-`netbox-to-diode` em `oauth2/client/client-credentials.json` e cole em
-`configuration/plugins.py` (`netbox_to_diode_client_secret`). Depois
-instale o [orb-agent](https://github.com/netboxlabs/orb-agent) apontando
-para esse Diode server para automatizar a descoberta contínua. Detalhes
-completos: https://github.com/netboxlabs/diode.
+O script gera as credenciais OAuth2 em `oauth2/client/client-credentials.json`.
+Pegue o `client_secret` do client `netbox-to-diode` e cole em
+`configuration/plugins.py` (`netbox_to_diode_client_secret`), depois
+rebuilde a imagem do NetBox (`docker compose build --no-cache`).
 
-> Nota de licença: Diode é distribuído sob a "NetBox Limited Use
-> License 1.0" (não é Apache/MIT) — gratuito para uso, mas vale ler os
-> termos antes de colocar em produção.
+Passo 2 — gerar um client de ingestão pro Orb Agent (rodando ainda
+dentro de `/opt/diode`):
+
+```bash
+docker compose run --rm --no-deps diode-auth authmanager \
+  create-client --client-id orb-agent-01 --allow-ingest
+```
+
+Guarde o `client_id`/`client_secret` retornados — não aparecem de novo.
+
+Passo 3 — configurar e rodar o Orb Agent. Copie
+`orb-agent/agent.yaml.example` deste template para `orb-agent/agent.yaml`,
+ajuste os `targets` (subnets reais do cliente) e o `target:` do Diode
+(host/porta de onde subiu no passo 1), depois:
+
+```bash
+cd orb-agent
+docker run --net=host -v "$(pwd)":/opt/orb/ \
+  -e DIODE_CLIENT_ID=orb-agent-01 \
+  -e DIODE_CLIENT_SECRET=<client_secret_do_passo_2> \
+  netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
+```
+
+O `agent.yaml.example` já vem com uma policy de `network_discovery`
+(varredura de subnet) e uma de `device_discovery` (SSH/NAPALM em
+devices conhecidos, mesma ideia do `napalm_collect.py` mas passando
+pela reconciliação do Diode). Use `dry_run: true` no bloco `diode:` se
+quiser conferir o que seria enviado antes de aplicar de verdade no
+NetBox — mais detalhes e outros backends (SNMP, jumphost/bastion) em
+https://netboxlabs.com/docs/orb-agent/config_samples.
+
+> Nota de licença: Diode e Orb Agent são distribuídos sob a "NetBox
+> Limited Use License 1.0" (não é Apache/MIT) — gratuito para uso, mas
+> vale ler os termos antes de colocar em produção. O Orb Agent está em
+> estágio "Public Preview" (pode mudar).
 
 ## 3. Integração com Zabbix
 
@@ -327,3 +411,7 @@ recriar o repositório.
 - [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server)
 - [netboxlabs/diode](https://github.com/netboxlabs/diode)
 - [netboxlabs/diode-netbox-plugin](https://github.com/netboxlabs/diode-netbox-plugin)
+- [netbox-community/netbox-topology-views](https://github.com/netbox-community/netbox-topology-views) (tabela de compatibilidade no README)
+- [netbox-community/netbox-qrcode](https://github.com/netbox-community/netbox-qrcode) (COMPATIBILITY.md)
+- [Orb Agent — configuração e exemplos](https://netboxlabs.com/docs/orb-agent/config_samples)
+- [netboxcommunity/netbox tags (Docker Hub)](https://hub.docker.com/r/netboxcommunity/netbox/tags) — usado para confirmar qual patch a tag `v4.5` aponta hoje

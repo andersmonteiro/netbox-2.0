@@ -3,14 +3,38 @@
 # Estende a imagem oficial do NetBox com os plugins listados em
 # plugin_requirements.txt. Baseado no padrão oficial descrito em:
 # https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins
+#
+# IMPORTANTE — versão do NetBox fixada em v4.5.10 (não "latest"):
+# netbox-topology-views (na versão atual, 4.5.1) só declara suporte até
+# NetBox 4.5.X — ainda não existe release compatível com a linha 4.6.
+# Se apontarmos para "latest" (hoje = v4.6.3), o build passa mas o
+# plugin quebra em runtime.
+#
+# v4.5.10 (05/05/2026) foi o ÚLTIMO patch da série 4.5 — a série 4.6
+# saiu no dia seguinte e já recebeu 3 patches próprios desde então
+# (4.6.1, 4.6.2, 4.6.3), sem nenhum backport pra 4.5.x. Ou seja, na
+# prática a série 4.5 está congelada: usar a tag flutuante "v4.5" ou o
+# número fixo "v4.5.10" dá exatamente no mesmo hoje. Fixamos o número
+# explícito pra deixar isso claro (e pra build ser 100% reprodutível).
+#
+# Consequência: se sair uma falha de segurança pra linha 4.5, não deve
+# vir patch. Nesse cenário, as opções são: (a) esperar o
+# netbox-topology-views suportar 4.6 e fazer o bump completo (ver
+# tabela de compatibilidade no README), (b) remover temporariamente o
+# topology-views e subir pra 4.6, ou (c) aceitar o risco por um tempo.
+# Ver seção "Versão do NetBox e compatibilidade de plugins" no README.
 # ==========================================================================
-FROM netboxcommunity/netbox:latest
+FROM netboxcommunity/netbox:v4.5.10
 
 COPY ./plugin_requirements.txt /opt/netbox/
 RUN /usr/local/bin/uv pip install -r /opt/netbox/plugin_requirements.txt
 
 # Config com a lista de plugins habilitados (PLUGINS = [...])
 COPY configuration/plugins.py /etc/netbox/config/plugins.py
+
+# netbox-topology-views precisa dessa pasta de imagens estáticas existir
+# no build (ver README do plugin).
+RUN mkdir -p /opt/netbox/netbox/static/netbox_topology_views/img
 
 # Alguns plugins (ex: netbox-topology-views) trazem arquivos estáticos
 # próprios; é preciso rodar collectstatic no build para que fiquem

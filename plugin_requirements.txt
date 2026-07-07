@@ -3,19 +3,35 @@
 # Cada linha é um pacote PyPI. Depois de adicionar/remover algo aqui,
 # habilite/desabilite o plugin correspondente em configuration/plugins.py
 # e rode: docker compose build --no-cache && docker compose up -d
+#
+# TODAS as versões abaixo estão PINADAS (==) de propósito, casadas com
+# NetBox v4.5.x (ver Dockerfile-Plugins e a seção "Versão do NetBox e
+# compatibilidade de plugins" no README). Não tire o pin sem checar a
+# tabela de compatibilidade de cada plugin primeiro — foi exatamente
+# isso que quebrou antes com "latest".
 # ==========================================================================
 
 # Plugin oficial da NetBox Labs, necessário para receber dados via Diode
 # (ingestão automática vinda de descoberta de rede / orb-agent / SDKs).
+# Compatibilidade: NetBox >=4.5.0 -> plugin 1.7.0 (>=4.6.0 exige 1.12.0)
 # https://github.com/netboxlabs/diode-netbox-plugin
-netboxlabs-diode-netbox-plugin
+netboxlabs-diode-netbox-plugin==1.7.0
 
-# Visualização topológica automática a partir dos dados já cadastrados
-# (ajuda a validar visualmente o que as automações preencheram).
-# Descomente se quiser usar: https://github.com/netbox-community/netbox-topology-views
-# netbox-topology-views
+# Mapa de topologia gerado a partir dos cabos/conexões já cadastrados.
+# Compatibilidade: NetBox = 4.5.X -> plugin = 4.5.1 (só suporta 4.5.X,
+# ainda não tem release pra linha 4.6)
+# https://github.com/netbox-community/netbox-topology-views
+netbox-topology-views==4.5.1
+
+# Gera QR Code para Device, Module, Cable, Power Feed/Panel, Location —
+# útil pra colar etiqueta física no equipamento e escanear pra abrir a
+# ficha no NetBox.
+# Compatibilidade: NetBox >=4.5.0,<=4.5.x -> plugin 0.0.20
+# https://github.com/netbox-community/netbox-qrcode
+netbox-qrcode==0.0.20
 
 # Controle de inventário/ativos (números de série, garantias, PO) —
 # útil se você quiser estender o preenchimento automático além de rede.
+# Descomente e confira a tabela de compatibilidade antes de usar:
 # https://github.com/netbox-community/netbox-inventory
 # netbox-inventory

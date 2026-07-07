@@ -1,0 +1,64 @@
+# ==========================================================================
+# orb-agent/agent.yaml.example
+#
+# Config do Orb Agent (descoberta de rede da NetBox Labs). Ele varre a
+# rede/conecta nos devices e manda o resultado pro Diode, que reconcilia
+# e aplica no NetBox. Requer a stack do Diode já rodando (README, seção
+# "Diode") e o plugin netbox_diode_plugin habilitado (já está em
+# plugin_requirements.txt / configuration/plugins.py).
+#
+# Copie para agent.yaml, preencha os alvos e rode (seção 2.3 do README).
+# Referência oficial: https://netboxlabs.com/docs/orb-agent/config_samples
+# ==========================================================================
+
+orb:
+  config_manager:
+    active: local
+
+  backends:
+    # Varredura de rede (ping/porta) — descobre hosts ativos numa faixa.
+    network_discovery:
+    # Conecta via SSH/NAPALM em devices já conhecidos e coleta facts,
+    # interfaces, IPs. Comente esse bloco (e a policy correspondente
+    # abaixo) se só quiser o network_discovery por enquanto.
+    device_discovery:
+
+    common:
+      diode:
+        # Endereço gRPC do Diode server (mesma stack da seção "Diode").
+        target: grpc://SEU_DIODE_HOST:8080/diode
+        # Gere esse client com:
+        #   docker compose run --rm --no-deps diode-auth authmanager \
+        #     create-client --client-id orb-agent-01 --allow-ingest
+        # (rodar dentro da pasta onde a stack do Diode foi instalada)
+        client_id: ${DIODE_CLIENT_ID}
+        client_secret: ${DIODE_CLIENT_SECRET}
+        agent_name: orb-agent-01
+
+  policies:
+    network_discovery:
+      varredura_geral:
+        config:
+          # Roda a cada 2 horas. Ajuste o cron conforme a rede do cliente.
+          schedule: "0 */2 * * *"
+          timeout: 5
+          defaults:
+            description: "Descoberto via orb-agent (network_discovery)"
+            tags: ["auto-discovered", "orb-agent"]
+        scope:
+          # Troque pelas subnets reais do cliente.
+          targets: [192.168.0.0/24, 10.0.0.0/16]
+
+    device_discovery:
+      devices_conhecidos:
+        config:
+          schedule: "0 */6 * * *"
+          defaults:
+            site: "Matriz"
+        scope:
+          # Um item por device já conhecido (mesmo padrão do
+          # automation-scripts/napalm_collect.py, mas via Diode).
+          - driver: ios
+            hostname: 192.168.0.5
+            username: admin
+            password: ${DEVICE_PASSWORD}
