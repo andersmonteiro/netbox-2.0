@@ -205,31 +205,20 @@ fi
 #   export SUPERUSER_API_KEY='sua-key-fixa-de-32-hex'
 #   curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 # --------------------------------------------------------------------
+SUPERUSER_PASSWORD_AUTO=false
 if grep -q "troque-esta-senha" "$ENV_FILE" 2>/dev/null; then
     if [ -n "${SUPERUSER_PASSWORD:-}" ]; then
         # Veio via variável de ambiente -- usa direto, sem perguntar nada.
         FINAL_PASSWORD="$SUPERUSER_PASSWORD"
         echo "    Usando SUPERUSER_PASSWORD fornecido via variável de ambiente."
     else
-        # Gera uma senha aleatória, mostra ela, e pergunta se quer trocar
-        # (em vez de pedir pra digitar uma senha às cegas). Lemos de
-        # /dev/tty (o terminal do usuário) em vez do stdin do script,
-        # porque em "curl | bash" o stdin já está ocupado com o conteúdo
-        # baixado pelo curl. Se não houver terminal (ex: cron/CI), fica
-        # com a senha aleatória mesmo, sem perguntar.
+        # Gera uma senha aleatória e segue direto, SEM parar o script pra
+        # perguntar aqui -- isso travava o terminal bem no meio da
+        # instalação, antes de Diode/build/up rodarem. A chance de trocar
+        # essa senha fica pro final, depois que a stack inteira já
+        # estiver de pé (ver bloco logo após "Stack no ar.").
         FINAL_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')"
-        if [ -r /dev/tty ]; then
-            echo ""
-            echo "    Senha gerada automaticamente: $FINAL_PASSWORD"
-            read -r -p "    Usar essa senha? (Y/n): " KEEP_PW < /dev/tty || KEEP_PW=""
-            if [ "$KEEP_PW" = "n" ] || [ "$KEEP_PW" = "N" ]; then
-                read -r -s -p "    Digite a nova senha do superusuário: " TYPED_PASSWORD < /dev/tty || TYPED_PASSWORD=""
-                echo ""
-                if [ -n "$TYPED_PASSWORD" ]; then
-                    FINAL_PASSWORD="$TYPED_PASSWORD"
-                fi
-            fi
-        fi
+        SUPERUSER_PASSWORD_AUTO=true
     fi
     sed -i "s|SUPERUSER_PASSWORD=troque-esta-senha|SUPERUSER_PASSWORD=${FINAL_PASSWORD}|" "$ENV_FILE"
 fi
@@ -403,6 +392,48 @@ log "7/7 Subindo a stack (isso pode levar vários minutos na 1ª vez -- o NetBox
 (cd "$REPO_DIR/netbox-docker" && docker compose up -d) > "$NETBOX_UP_LOG" 2>&1 \
     || { warn "Subida da stack falhou -- veja $NETBOX_UP_LOG"; exit 1; }
 echo "    Stack no ar."
+
+# --------------------------------------------------------------------
+# Chance de trocar a senha do superusuário -- só AGORA, com a stack
+# inteira já de pé (não trava mais o script no meio da instalação).
+# Só pergunta se a senha foi gerada automaticamente (se veio via
+# SUPERUSER_PASSWORD por variável de ambiente, não há o que perguntar)
+# e só se houver terminal interativo (/dev/tty); em "curl | bash" sem
+# TTY (cron/CI) segue com a senha gerada, sem travar.
+# --------------------------------------------------------------------
+if [ "$SUPERUSER_PASSWORD_AUTO" = "true" ] && [ -r /dev/tty ]; then
+    SUPERUSER_NAME_VAL="$(grep '^SUPERUSER_NAME=' "$ENV_FILE" | cut -d= -f2)"
+    echo ""
+    echo "    Senha gerada automaticamente: $FINAL_PASSWORD"
+    read -r -p "    Usar essa senha? (Y/n): " KEEP_PW < /dev/tty || KEEP_PW=""
+    if [ "$KEEP_PW" = "n" ] || [ "$KEEP_PW" = "N" ]; then
+        read -r -s -p "    Digite a nova senha do superusuário: " TYPED_PASSWORD < /dev/tty || TYPED_PASSWORD=""
+        echo ""
+        if [ -n "$TYPED_PASSWORD" ]; then
+            # A stack já está no ar -- o superusuário já foi criado no
+            # boot anterior, então só editar o .env não muda mais nada;
+            # troca a senha direto no container rodando. Secret vai por
+            # variável de ambiente pro "docker compose exec" (não
+            # interpolado no código Python), evitando problema de
+            # aspas/caractere especial na senha digitada.
+            if (cd "$REPO_DIR/netbox-docker" && docker compose exec -T \
+                    -e NB_USER="$SUPERUSER_NAME_VAL" -e NEW_PW="$TYPED_PASSWORD" \
+                    netbox /opt/netbox/netbox/manage.py shell -c '
+import os
+from django.contrib.auth import get_user_model
+u = get_user_model().objects.get(username=os.environ["NB_USER"])
+u.set_password(os.environ["NEW_PW"])
+u.save()
+') >> "$NETBOX_UP_LOG" 2>&1; then
+                FINAL_PASSWORD="$TYPED_PASSWORD"
+                sed -i "s|^SUPERUSER_PASSWORD=.*|SUPERUSER_PASSWORD=${FINAL_PASSWORD}|" "$ENV_FILE"
+                echo "    Senha trocada."
+            else
+                warn "Não consegui trocar a senha automaticamente -- detalhes em $NETBOX_UP_LOG. A senha gerada acima ainda funciona."
+            fi
+        fi
+    fi
+fi
 
 DIODE_PENDENCIA_LINE=""
 if [ "$WITH_DIODE" != "true" ]; then
