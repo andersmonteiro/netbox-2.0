@@ -50,12 +50,11 @@ aplicado, gera senha/token do superusuário automaticamente e já deixa a
 stack no ar.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SEU_USUARIO/netbox-template/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 ```
 
-(troque `SEU_USUARIO` pelo dono real do repositório no GitHub — ver
-seção 6). No final ele imprime a URL, usuário, senha e token gerados —
-anote na hora, não aparecem de novo.
+No final ele imprime a URL, usuário, senha e token gerados — anote na
+hora, não aparecem de novo.
 
 Esse comando só funciona porque o repositório é **público** (sem
 segredo nenhum nele — ver seção 7); a VM do cliente não precisa de
@@ -276,7 +275,7 @@ cd D:\projetos-natverk\netbox-2.0
 git init -b main
 git add -A
 git commit -m "Template inicial: NetBox + Docker + automações + Zabbix + MCP"
-git remote add origin https://github.com/SEU_USUARIO/netbox-template.git
+git remote add origin https://github.com/andersmonteiro/netbox-2.0.git
 git push -u origin main
 ```
 
@@ -287,7 +286,7 @@ Zone" → **Change visibility** → Public.
 **Fluxo por cliente:**
 
 1. No servidor do cliente (novo, sem nada instalado):
-   `curl -fsSL https://raw.githubusercontent.com/SEU_USUARIO/netbox-template/main/bootstrap.sh | bash`
+   `curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash`
    — isso já clona o template, instala Docker, sobe tudo.
 2. Edite `netbox-2.0/netbox-docker/.env` (gerado automaticamente pelo
    bootstrap com senha/token aleatórios) com os dados reais desse

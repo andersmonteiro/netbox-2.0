@@ -5,7 +5,7 @@
 # Instalação completa em um servidor NOVO (sem Docker, sem nada). Pensado
 # para rodar direto no cliente com um único comando:
 #
-#   curl -fsSL https://raw.githubusercontent.com/SEU_USUARIO/netbox-template/main/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 #
 # O que ele faz:
 #   1. Instala dependências de sistema (git, curl, nmap, python3, openssl)
@@ -20,12 +20,12 @@
 # precisar de ajuste manual (o script avisa e continua mesmo assim).
 #
 # Variáveis de ambiente opcionais:
-#   TEMPLATE_REPO_URL  -> default: https://github.com/SEU_USUARIO/netbox-template.git
+#   TEMPLATE_REPO_URL  -> default: https://github.com/andersmonteiro/netbox-2.0.git
 #   INSTALL_DIR        -> default: /opt/netbox-2.0
 # ==========================================================================
 set -euo pipefail
 
-TEMPLATE_REPO_URL="${TEMPLATE_REPO_URL:-https://github.com/SEU_USUARIO/netbox-template.git}"
+TEMPLATE_REPO_URL="${TEMPLATE_REPO_URL:-https://github.com/andersmonteiro/netbox-2.0.git}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/netbox-2.0}"
 
 log()  { echo -e "\n==> $1"; }
