@@ -1,0 +1,6 @@
+pynetbox>=7.4,<8
+pandas>=2.2
+openpyxl>=3.1
+napalm>=5.0
+netmiko>=4.3
+python-dotenv>=1.0

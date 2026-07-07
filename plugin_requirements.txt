@@ -1,0 +1,21 @@
+# ==========================================================================
+# Plugins do NetBox instalados no build (ver Dockerfile-Plugins).
+# Cada linha é um pacote PyPI. Depois de adicionar/remover algo aqui,
+# habilite/desabilite o plugin correspondente em configuration/plugins.py
+# e rode: docker compose build --no-cache && docker compose up -d
+# ==========================================================================
+
+# Plugin oficial da NetBox Labs, necessário para receber dados via Diode
+# (ingestão automática vinda de descoberta de rede / orb-agent / SDKs).
+# https://github.com/netboxlabs/diode-netbox-plugin
+netboxlabs-diode-netbox-plugin
+
+# Visualização topológica automática a partir dos dados já cadastrados
+# (ajuda a validar visualmente o que as automações preencheram).
+# Descomente se quiser usar: https://github.com/netbox-community/netbox-topology-views
+# netbox-topology-views
+
+# Controle de inventário/ativos (números de série, garantias, PO) —
+# útil se você quiser estender o preenchimento automático além de rede.
+# https://github.com/netbox-community/netbox-inventory
+# netbox-inventory

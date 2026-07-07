@@ -1,0 +1,19 @@
+# ==========================================================================
+# Dockerfile-Plugins
+# Estende a imagem oficial do NetBox com os plugins listados em
+# plugin_requirements.txt. Baseado no padrão oficial descrito em:
+# https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins
+# ==========================================================================
+FROM netboxcommunity/netbox:latest
+
+COPY ./plugin_requirements.txt /opt/netbox/
+RUN /usr/local/bin/uv pip install -r /opt/netbox/plugin_requirements.txt
+
+# Config com a lista de plugins habilitados (PLUGINS = [...])
+COPY configuration/plugins.py /etc/netbox/config/plugins.py
+
+# Alguns plugins (ex: netbox-topology-views) trazem arquivos estáticos
+# próprios; é preciso rodar collectstatic no build para que fiquem
+# disponíveis quando o container subir.
+RUN DEBUG="true" SECRET_KEY="dummydummydummydummydummydummydummydummydummydummy" \
+    /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py collectstatic --no-input

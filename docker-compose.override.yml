@@ -1,0 +1,102 @@
+# ==========================================================================
+# docker-compose.override.yml
+#
+# COMO USAR:
+#   1. Clone o repositório oficial (sempre a última versão estável, já
+#      pronta para build com plugins):
+#         git clone -b release https://github.com/netbox-community/netbox-docker.git
+#         cd netbox-docker
+#   2. Copie para a RAIZ desse repositório clonado (mesmo nível do
+#      docker-compose.yml original):
+#        - este arquivo (substitui o docker-compose.override.yml.example)
+#        - Dockerfile-Plugins
+#        - plugin_requirements.txt
+#        - a pasta configuration/plugins.py (mescla com a configuration/ existente)
+#        - a pasta automation-scripts/
+#        - a pasta zabbix-sync/
+#        - o .env (copiado e preenchido a partir de .env.example)
+#   3. docker compose build --no-cache
+#   4. docker compose up -d
+#
+# Este arquivo estende o docker-compose.yml oficial do netbox-docker,
+# então toda vez que você der "git pull" no repositório oficial, continua
+# recebendo atualizações de segurança/versão do NetBox sem perder as
+# customizações abaixo.
+# ==========================================================================
+
+services:
+  # --------------------------------------------------------------------
+  # Substitui a imagem oficial por uma build local com plugins instalados
+  # --------------------------------------------------------------------
+  netbox:
+    image: netbox:latest-plugins
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile-Plugins
+    ports:
+      - "8000:8080"
+    env_file:
+      - .env
+
+  netbox-worker:
+    image: netbox:latest-plugins
+    pull_policy: never
+    env_file:
+      - .env
+
+  netbox-housekeeping:
+    image: netbox:latest-plugins
+    pull_policy: never
+    env_file:
+      - .env
+
+  # --------------------------------------------------------------------
+  # Automação: sincronização NetBox -> Zabbix (roda periodicamente)
+  # --------------------------------------------------------------------
+  netbox-zabbix-sync:
+    image: ghcr.io/thenetworkguy/netbox-zabbix-sync:main
+    container_name: netbox-zabbix-sync
+    restart: unless-stopped
+    depends_on:
+      - netbox
+    env_file:
+      - .env
+    volumes:
+      - ./zabbix-sync/config.py:/opt/netbox-zabbix/config.py:ro
+    # A imagem roda um sync único e encerra; o entrypoint abaixo faz um
+    # loop simples a cada 5 minutos. Ajuste o "sleep" conforme sua necessidade
+    # ou substitua por um agendamento via cron/systemd no host.
+    entrypoint: >
+      /bin/sh -c "while true; do
+        python3 /opt/netbox-zabbix/netbox_zabbix_sync.py -v;
+        sleep 300;
+      done"
+
+  # --------------------------------------------------------------------
+  # Agente de IA: NetBox MCP Server (leitura via LLM/Claude)
+  # --------------------------------------------------------------------
+  netbox-mcp-server:
+    image: netboxlabs/netbox-mcp-server:latest
+    container_name: netbox-mcp-server
+    restart: unless-stopped
+    depends_on:
+      - netbox
+    environment:
+      NETBOX_URL: ${MCP_NETBOX_URL}
+      NETBOX_TOKEN: ${MCP_NETBOX_TOKEN}
+      TRANSPORT: ${MCP_TRANSPORT}
+      HOST: 0.0.0.0
+      PORT: ${MCP_PORT}
+      ENABLE_PLUGIN_DISCOVERY: "true"
+    ports:
+      - "${MCP_PORT}:${MCP_PORT}"
+
+# --------------------------------------------------------------------
+# Diode (ingestão automática via descoberta de rede) NÃO entra aqui.
+# É um produto separado da NetBox Labs, com seu próprio docker-compose
+# (Auth + Ingester + Reconciler + Postgres + Redis) instalado via script
+# oficial "quickstart.sh". Ver README.md -> seção "Diode" para o passo a
+# passo completo, incluindo o plugin netbox_diode_plugin (já incluído em
+# plugins/plugin_requirements.txt) e o orb-agent de descoberta.
+# --------------------------------------------------------------------

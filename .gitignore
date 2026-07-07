@@ -1,0 +1,32 @@
+# ==========================================================================
+# Este repositório é um TEMPLATE reaproveitável entre clientes.
+# Nada com dado real de cliente (senha, token, IP, planilha) deve ser
+# commitado aqui. Cada deploy usa seu próprio .env fora do git.
+# ==========================================================================
+
+# Segredos / config por ambiente
+.env
+**/client-data/
+**/*.secrets.py
+
+# Repositório oficial do NetBox, clonado pelo setup.sh a cada deploy —
+# não vendorizamos ele aqui, sempre puxamos a versão mais recente.
+/netbox-docker/
+
+# Planilhas de importação (dados reais de cliente)
+automation-scripts/planilhas/
+*.xlsx
+*.xls
+!**/exemplos/*.xlsx
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
