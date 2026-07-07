@@ -270,6 +270,7 @@ if [ "$WITH_DIODE" = "true" ]; then
         warn "jq não encontrado -- pulando setup automático do Diode. Instale jq e siga a seção 2.3 do README manualmente."
     else
         mkdir -p "$DIODE_DIR"
+        DIODE_LOG="$DIODE_DIR/install.log"
         DIODE_OK=true
         (
             cd "$DIODE_DIR"
@@ -277,7 +278,10 @@ if [ "$WITH_DIODE" = "true" ]; then
                 curl -sSfLo quickstart.sh https://raw.githubusercontent.com/netboxlabs/diode/release/diode-server/docker/scripts/quickstart.sh
                 chmod +x quickstart.sh
             fi
-            ./quickstart.sh "http://${SERVER_IP:-localhost}:8000"
+            # quickstart.sh + docker compose up são barulhentos (pull de
+            # imagem, etc.) -- manda pra um log em vez de poluir a tela;
+            # a mensagem final resume o que importa.
+            ./quickstart.sh "http://${SERVER_IP:-localhost}:8000" > "$DIODE_LOG" 2>&1
 
             # Pin de versão: a branch "release" (que o quickstart.sh
             # sempre baixa, sem versão fixa) evolui sem aviso. Confirmado
@@ -313,7 +317,7 @@ services:
     image: netboxlabs/diode-auth:1.12.0
 DIODEPIN
 
-            docker compose up -d
+            docker compose up -d >> "$DIODE_LOG" 2>&1
         ) || DIODE_OK=false
 
         if [ "$DIODE_OK" = "true" ] && [ -f "$DIODE_DIR/oauth2/client/client-credentials.json" ]; then
@@ -340,14 +344,14 @@ DIODEPIN
                         cd "$DIODE_DIR"
                         docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode
                         docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="$DIODE_SECRET"
-                    ) >/dev/null 2>&1; then
+                    ) >> "$DIODE_LOG" 2>&1; then
                         DIODE_AUTH_FIX_OK=true
                         break
                     fi
                     sleep 3
                 done
                 if [ "$DIODE_AUTH_FIX_OK" != "true" ]; then
-                    warn "Não consegui recriar o client netbox-to-diode com o método de auth correto (mesmo com retry). Se o NetBox mostrar 401 nos logs ao consultar o Diode, rode manualmente (seção 2.3 do README): docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode && docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope \"diode:read diode:write\" --client-secret=\"\$SECRET\""
+                    warn "Não consegui recriar o client netbox-to-diode com o método de auth correto (mesmo com retry) -- detalhes em $DIODE_LOG. Se o NetBox mostrar 401 nos logs ao consultar o Diode, rode manualmente (seção 2.3 do README): docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode && docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope \"diode:read diode:write\" --client-secret=\"\$SECRET\""
                 fi
             fi
 
@@ -355,7 +359,7 @@ DIODEPIN
             if [ -n "$DIODE_SECRET" ] && [ -f "$PLUGINS_PY" ]; then
                 sed -i "s|\"diode_target_override\": \"grpc://diode.local:8080/diode\",|\"diode_target_override\": \"grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode\",|" "$PLUGINS_PY"
                 sed -i "s|\"netbox_to_diode_client_secret\": \"PREENCHER_APOS_QUICKSTART_DIODE\",|\"netbox_to_diode_client_secret\": \"${DIODE_SECRET}\",|" "$PLUGINS_PY"
-                echo "    Diode no ar e plugins.py já configurado (grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode)."
+                echo "    Diode no ar e plugins.py já configurado (grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode). Log: $DIODE_LOG"
                 DIODE_INGEST_SECRET="$(jq -r '.[] | select(.client_id=="diode-ingest") | .client_secret' "$DIODE_DIR/oauth2/client/client-credentials.json" 2>/dev/null || echo "")"
 
                 # Deixa o Orb Agent pronto pra usar -- só falta o operador
@@ -374,7 +378,7 @@ DIODEPIN
                 warn "Diode subiu mas não consegui extrair o secret/plugins.py automaticamente. Siga a seção 2.3 do README (passo 2) na mão."
             fi
         else
-            warn "Falha ao subir o Diode automaticamente. Siga a seção 2.3 do README na mão, ou rode de novo depois: cd $DIODE_DIR && docker compose up -d"
+            warn "Falha ao subir o Diode automaticamente -- detalhes em $DIODE_LOG. Siga a seção 2.3 do README na mão, ou rode de novo depois: cd $DIODE_DIR && docker compose up -d"
         fi
     fi
 else
@@ -384,11 +388,20 @@ fi
 # --------------------------------------------------------------------
 # 6. Build da imagem e subida da stack
 # --------------------------------------------------------------------
-log "6/7 Build da imagem (com plugins)..."
-(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache)
+# Build e "up" imprimem muita coisa (pull/build de camada por camada) --
+# manda pra log em vez de poluir a tela; se falhar, aponta pro log em
+# vez de sumir sem explicação (esses dois passos não são opcionais
+# como o Diode, então um erro aqui deve parar o script mesmo).
+NETBOX_BUILD_LOG="$REPO_DIR/netbox-docker/build.log"
+NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
-log "7/7 Subindo a stack (isso pode levar vários minutos na 1ª vez -- o NetBox roda uma leva grande de migrations antes de virar 'healthy'; o docker-compose.override.yml já ajusta o healthcheck pra dar tempo suficiente, então o compose espera sozinho, sem erro de dependência no meio)..."
-(cd "$REPO_DIR/netbox-docker" && docker compose up -d)
+log "6/7 Build da imagem (com plugins)... (log em $NETBOX_BUILD_LOG)"
+(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache) > "$NETBOX_BUILD_LOG" 2>&1 \
+    || { warn "Build da imagem falhou -- veja $NETBOX_BUILD_LOG"; exit 1; }
+
+log "7/7 Subindo a stack (isso pode levar vários minutos na 1ª vez -- o NetBox roda uma leva grande de migrations antes de virar 'healthy'; o docker-compose.override.yml já ajusta o healthcheck pra dar tempo suficiente, então o compose espera sozinho, sem erro de dependência no meio)... (log em $NETBOX_UP_LOG)"
+(cd "$REPO_DIR/netbox-docker" && docker compose up -d) > "$NETBOX_UP_LOG" 2>&1 \
+    || { warn "Subida da stack falhou -- veja $NETBOX_UP_LOG"; exit 1; }
 echo "    Stack no ar."
 
 DIODE_PENDENCIA_LINE=""
