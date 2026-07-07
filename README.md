@@ -248,41 +248,65 @@ Já deixei o plugin `netbox_diode_plugin` no `plugin_requirements.txt`
 (pinado na versão 1.7.0, compatível com NetBox 4.5.x) pra você não
 precisar rebuildar a imagem depois.
 
-Passo 1 — subir o servidor Diode (stack própria, separada do NetBox):
+Pré-requisito: `jq` instalado (o `bootstrap.sh` já instala; se você usou
+o `setup.sh` num servidor que já tinha Docker, confira com `jq --version`
+e instale com `apt install jq` se faltar).
+
+Passo 1 — subir o servidor Diode (stack própria, separada do NetBox;
+pode rodar na mesma VM do NetBox, só que como um `docker compose`
+diferente):
 
 ```bash
-mkdir /opt/diode && cd /opt/diode
+mkdir -p /opt/diode && cd /opt/diode
 curl -sSfLo quickstart.sh https://raw.githubusercontent.com/netboxlabs/diode/release/diode-server/docker/scripts/quickstart.sh
 chmod +x quickstart.sh
-./quickstart.sh http://SEU_NETBOX:8000
+./quickstart.sh http://SEU_NETBOX_IP:8000
 docker compose up -d
 ```
 
-O script gera as credenciais OAuth2 em `oauth2/client/client-credentials.json`.
-Pegue o `client_secret` do client `netbox-to-diode` e cole em
-`configuration/plugins.py` (`netbox_to_diode_client_secret`), depois
-rebuilde a imagem do NetBox (`docker compose build --no-cache`).
+O `quickstart.sh` já faz tudo sozinho: baixa o `docker-compose.yaml` e
+`nginx.conf` do Diode, gera **três** clients OAuth2 em
+`oauth2/client/client-credentials.json` (`diode-ingest`,
+`diode-to-netbox`, `netbox-to-diode`), preenche o `.env` com os
+segredos e o `NETBOX_HOST`, e no final imprime o `DIODE_CLIENT_ID` /
+`DIODE_CLIENT_SECRET` do client `diode-ingest` — já prontos pro Orb
+Agent (passo 3). **Não precisa criar cliente manualmente** — isso é o
+comportamento atual do script; se algum dia mudar, o próprio output
+final dele avisa.
 
-Passo 2 — gerar um client de ingestão pro Orb Agent (rodando ainda
-dentro de `/opt/diode`):
+Passo 2 — pegar o secret do client `netbox-to-diode` (usado pelo plugin
+dentro do NetBox, não pelo Orb Agent) e colar na configuração:
 
 ```bash
-docker compose run --rm --no-deps diode-auth authmanager \
-  create-client --client-id orb-agent-01 --allow-ingest
+jq -r '.[] | select(.client_id=="netbox-to-diode") | .client_secret' \
+  oauth2/client/client-credentials.json
 ```
 
-Guarde o `client_id`/`client_secret` retornados — não aparecem de novo.
+Cole o valor em `configuration/plugins.py` →
+`netbox_to_diode_client_secret`, e ajuste `diode_target_override` pra
+`grpc://SEU_SERVIDOR_IP:8080/diode` (a porta é o `DIODE_NGINX_PORT` do
+`.env` do Diode, 8080 por padrão). **Use o IP do servidor, não
+`localhost`** — o Diode roda num `docker compose` separado do NetBox,
+então "localhost" de dentro do container do NetBox não alcança o Diode
+mesmo estando na mesma VM. Depois, rebuilde e reinicie o NetBox:
+
+```bash
+cd /opt/netbox-2.0/netbox-docker
+docker compose build --no-cache
+docker compose up -d
+```
 
 Passo 3 — configurar e rodar o Orb Agent. Copie
 `orb-agent/agent.yaml.example` deste template para `orb-agent/agent.yaml`,
 ajuste os `targets` (subnets reais do cliente) e o `target:` do Diode
-(host/porta de onde subiu no passo 1), depois:
+para `grpc://SEU_SERVIDOR_IP:8080/diode` (mesmo endereço do passo 2),
+depois:
 
 ```bash
 cd orb-agent
 docker run --net=host -v "$(pwd)":/opt/orb/ \
-  -e DIODE_CLIENT_ID=orb-agent-01 \
-  -e DIODE_CLIENT_SECRET=<client_secret_do_passo_2> \
+  -e DIODE_CLIENT_ID=diode-ingest \
+  -e DIODE_CLIENT_SECRET=<client_secret_do_client_diode-ingest,_impresso_no_final_do_passo_1> \
   netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
 ```
 
