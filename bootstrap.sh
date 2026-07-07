@@ -328,11 +328,27 @@ DIODEPIN
             # aceitam client_secret_basic, então recriamos com o MESMO
             # secret pra corrigir sem precisar tocar no plugins.py de novo.
             if [ -n "$DIODE_SECRET" ]; then
-                (
-                    cd "$DIODE_DIR"
-                    docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode
-                    docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="$DIODE_SECRET"
-                ) >/dev/null 2>&1 || warn "Não consegui recriar o client netbox-to-diode com o método de auth correto. Se o NetBox mostrar 401 nos logs ao consultar o Diode, rode manualmente (seção 2.3 do README): docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode && docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope \"diode:read diode:write\" --client-secret=\"\$SECRET\""
+                # "docker compose up -d" (chamado logo acima) retorna assim
+                # que os containers INICIAM, não quando o Hydra termina de
+                # subir de verdade -- rodar o authmanager imediatamente
+                # depois pode cair numa corrida e falhar por conexão
+                # recusada. Tenta com retry (até ~30s) em vez de desistir
+                # na primeira falha.
+                DIODE_AUTH_FIX_OK=false
+                for _fix_try in 1 2 3 4 5 6 7 8 9 10; do
+                    if (
+                        cd "$DIODE_DIR"
+                        docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode
+                        docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="$DIODE_SECRET"
+                    ) >/dev/null 2>&1; then
+                        DIODE_AUTH_FIX_OK=true
+                        break
+                    fi
+                    sleep 3
+                done
+                if [ "$DIODE_AUTH_FIX_OK" != "true" ]; then
+                    warn "Não consegui recriar o client netbox-to-diode com o método de auth correto (mesmo com retry). Se o NetBox mostrar 401 nos logs ao consultar o Diode, rode manualmente (seção 2.3 do README): docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode && docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope \"diode:read diode:write\" --client-secret=\"\$SECRET\""
+                fi
             fi
 
             PLUGINS_PY="$REPO_DIR/netbox-docker/configuration/plugins.py"
