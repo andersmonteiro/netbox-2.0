@@ -389,12 +389,49 @@ docker run -d --name orb-agent --net=host --restart unless-stopped \
   netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
 ```
 
-O `agent.yaml.example` já vem com uma policy de `network_discovery`
-(varredura de subnet) e uma de `device_discovery` (SSH/NAPALM em
-devices conhecidos, mesma ideia do `napalm_collect.py` mas passando
-pela reconciliação do Diode). Use `dry_run: true` no bloco `diode:` se
-quiser conferir o que seria enviado antes de aplicar de verdade no
-NetBox — mais detalhes e outros backends (SNMP, jumphost/bastion) em
+**O `network_discovery` sozinho é "pobre" de propósito**: é uma
+varredura sem credencial (ping + porta), então só cria o IP no NetBox
+com as portas abertas nos comentários — não sabe modelo, fabricante,
+interfaces, nem cria objeto de Device. Isso é uma limitação de
+qualquer ferramenta de descoberta às cegas, não bug. Ele serve pra
+mapear "o que existe" na rede; pra detalhar de verdade um device que
+você já sabe que existe, use um dos dois backends de enriquecimento
+que o `agent.yaml.example` também já traz (comente o que não for usar):
+
+- **`device_discovery`** (SSH/NAPALM) — conecta em cada device com
+  usuário/senha e traz inventário completo (interfaces, versão de SO,
+  seriais). Precisa de credencial de shell por device.
+- **`snmp_discovery`** — mesma ideia, mas via SNMP (community v2c ou
+  credenciais v3) em vez de SSH. Costuma ser mais simples de habilitar
+  em switch/roteador que já tem SNMP ligado pro Zabbix.
+
+Diferente do `client_id`/`client_secret` do Diode (que **não** aceita
+`${VAR}`, precisa do valor literal no arquivo — nota acima), a
+documentação oficial do Orb Agent afirma que os campos de credencial
+desses dois backends (`password` do `device_discovery`;
+`community`/`username`/`auth_passphrase`/`priv_passphrase` do
+`snmp_discovery`) **aceitam `${VAR}`** de verdade, resolvida via
+variável de ambiente no `docker run -e`:
+
+```bash
+docker run -d --name orb-agent --net=host --restart unless-stopped \
+  -v "$(pwd)":/opt/orb/ \
+  -e DEVICE_PASSWORD='senha-do-device' \
+  -e SNMP_COMMUNITY='community-do-snmp' \
+  netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
+```
+
+Não confirmamos isso em produção ainda (só o comportamento do bloco
+`diode`, que falha) — depois do primeiro deploy com esses backends,
+confira `docker logs orb-agent` pra garantir que a credencial saiu
+resolvida e não como a string literal `${VAR}`. Se não expandir, o
+sintoma é o mesmo do bug do Diode: troque pelo valor real direto no
+YAML (e lembre que `agent.yaml` já está no `.gitignore` por causa
+disso).
+
+Use `dry_run: true` no bloco `diode:` se quiser conferir o que seria
+enviado antes de aplicar de verdade no NetBox — mais detalhes e outros
+cenários (jumphost/bastion, drivers customizados, OpenTelemetry) em
 https://netboxlabs.com/docs/orb-agent/config_samples.
 
 > Nota de licença: Diode e Orb Agent são distribuídos sob a "NetBox
