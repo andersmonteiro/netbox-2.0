@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Login · Descoberta de Rede{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 360px; margin: 60px auto 0;">
+  <h1>Entrar</h1>
+  <form method="post">
+    <div class="field">
+      <label>Usuário</label>
+      <input type="text" name="username" autofocus required>
+    </div>
+    <div class="field">
+      <label>Senha</label>
+      <input type="password" name="password" required>
+    </div>
+    <button type="submit" style="width:100%">Entrar</button>
+  </form>
+</div>
+{% endblock %}

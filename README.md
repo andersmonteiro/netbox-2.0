@@ -37,11 +37,17 @@ netbox-2.0/
 │   ├── napalm_collect.py           <- coleta via SSH/API (NAPALM)
 │   ├── discover_network.py         <- descoberta de rede (nmap, fallback)
 │   ├── create_discovery_fields.py  <- cria os custom fields de credencial no NetBox
-│   └── discovery_netbox.py         <- lê credencial do NetBox, coleta SSH/SNMP, revisão em JSON, aplica
+│   ├── discovery_core.py           <- lógica compartilhada (coleta SSH/SNMP + apply), usada pelo CLI e pela discovery-ui
+│   └── discovery_netbox.py         <- CLI: lê credencial do NetBox, coleta SSH/SNMP, revisão em JSON, aplica
+├── discovery-ui/                   <- interface web de descoberta (login simples, sem Diode -- ver seção 2.4)
+│   ├── app.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── templates/
 ├── zabbix-sync/
 │   └── config.py                   <- config do netbox-zabbix-sync
 └── orb-agent/
-    └── agent.yaml.example          <- descoberta de rede oficial (via Diode)
+    └── agent.yaml.example          <- descoberta de rede opcional via Diode (seção 2.3, desligado por padrão)
 ```
 
 Este é um **repositório template**: nada aqui tem dado de cliente
@@ -58,16 +64,19 @@ usa a última versão estável. Cada cliente tem seu próprio `.env`
 Um único comando: instala Docker + dependências (git, nmap, python3,
 jq...), clona este template, sobe o `netbox-docker` oficial com o
 overlay aplicado, gera senha/token do superusuário automaticamente,
-**sobe também o Diode + já deixa o Orb Agent pronto** (seção 2.3 —
-ligado por padrão em todo cliente novo, use ou não; desative com
-`WITH_DIODE=false`) e deixa a stack no ar.
+**sobe também a discovery-ui** (interface web de descoberta, seção 2.4
+— login simples, pensada pro time comercial revisar/aprovar
+descobertas sem usar terminal) e deixa a stack no ar. O Diode (seção
+2.3) fica **desligado por padrão** — é uma stack separada e mais
+pesada, só vale a pena se você já usa o ecossistema Diode/Orb Agent;
+ligue com `WITH_DIODE=true` se quiser.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 ```
 
-No final ele imprime a URL, usuário, senha e token gerados — anote na
-hora, não aparecem de novo.
+No final ele imprime a URL, usuário, senha e token gerados (NetBox e
+discovery-ui) — anote na hora, não aparecem de novo.
 
 **Senha do superusuário**: se você não tiver exportado
 `SUPERUSER_PASSWORD` antes, o script gera uma senha aleatória, mostra
@@ -252,13 +261,16 @@ Já deixei o plugin `netbox_diode_plugin` no `plugin_requirements.txt`
 (pinado na versão 1.7.0, compatível com NetBox 4.5.x) pra você não
 precisar rebuildar a imagem depois.
 
-**Se você instalou via `bootstrap.sh` (padrão), os passos 1 e 2 abaixo
-já rodaram sozinhos** — Diode sobe automaticamente (`WITH_DIODE=true`
-é o default) e `orb-agent/agent.yaml` já sai criado com as credenciais
-certas. Só falta o **passo 3**: editar os `targets` com as subnets
-reais do cliente e rodar o container. Os passos 1-2 abaixo servem pra
-quem instalou com `setup.sh` (sem bootstrap) ou desativou com
-`WITH_DIODE=false`/`--no-diode` e quer ligar depois.
+**O Diode fica desligado por padrão** (o caminho recomendado de
+descoberta é a `discovery-ui`/`discovery_netbox.py` da seção 2.4, que
+não depende de nenhum serviço externo). Se você quiser mesmo assim,
+rode o `bootstrap.sh` com `WITH_DIODE=true` (ou `--with-diode`) e os
+passos 1 e 2 abaixo rodam sozinhos — Diode sobe automaticamente e
+`orb-agent/agent.yaml` já sai criado com as credenciais certas. Só
+falta o **passo 3**: editar os `targets` com as subnets reais do
+cliente e rodar o container. Os passos 1-2 abaixo servem pra quem
+instalou com `setup.sh` (sem bootstrap) ou quer ligar o Diode depois,
+manualmente.
 
 Pré-requisito: `jq` instalado (o `bootstrap.sh` já instala; se você usou
 o `setup.sh` num servidor que já tinha Docker, confira com `jq --version`
@@ -466,6 +478,45 @@ flowchart TD
 
 O NetBox nunca é alterado direto pelo `collect` — sempre passa por um
 arquivo JSON no meio, com chance de revisão humana antes do `apply`.
+
+Duas formas de usar esse fluxo: pela **interface web** (`discovery-ui`
+— recomendado pra quem não usa terminal, ex: time comercial) ou pela
+**linha de comando** (`discovery_netbox.py` — pra automação/scripts).
+Os dois compartilham a mesma pasta `discovery_output/` como fila de
+pendências, então um device coletado por um aparece pra revisão no
+outro.
+
+#### Interface web (discovery-ui)
+
+Já sobe junto com o `bootstrap.sh`, em `http://SEU_SERVIDOR:5050`
+(login/senha nas credenciais impressas no final da instalação — ver
+`.env` do NetBox, variáveis `DISCOVERY_UI_USER`/`DISCOVERY_UI_PASSWORD`
+se precisar consultar depois).
+
+1. **Login** — usuário/senha simples, não integrado ao NetBox (é só
+   pra controlar quem acessa a tela, não um sistema de permissões).
+2. **Devices** (tela inicial) — lista todos os devices já cadastrados
+   no NetBox, com Site, IP de gerência, Platform, método de descoberta
+   e um status "pronto"/"incompleto". Marque os que quiser descobrir e
+   clique em "Rodar descoberta nos selecionados".
+3. **+ Cadastrar device** — pra um device que ainda não existe no
+   NetBox: nome, Site, Device Role, Device Type (esses três últimos
+   precisam já existir no NetBox — são cadastro único por instalação,
+   não por device), IP de gerência, Platform (só se for usar SSH) e as
+   credenciais de descoberta (usuário/senha SSH, ou community SNMP).
+   O botão "editar" na lista de devices abre o mesmo formulário pra
+   quem já existe, pra completar/trocar IP, Platform ou credencial.
+4. **Revisão** — depois de rodar a descoberta, cada device aparece
+   como um card com a lista de interfaces encontradas: checkbox pra
+   incluir/excluir cada uma e campo de descrição editável antes de
+   gravar. Nada vai pro NetBox até você clicar em "Aprovar e gravar no
+   NetBox" — ou "Descartar" se não quiser aplicar nada daquela coleta.
+
+#### Linha de comando (CLI) — para automação/scripts
+
+Mesma lógica de baixo nível por trás da discovery-ui (`discovery_core.py`),
+útil se você quiser rodar via cron, testar contra um device específico
+sem passar pela tela, ou integrar num pipeline próprio.
 
 Passo 1 — criar os Custom Fields de descoberta (uma vez só, por
 instalação):

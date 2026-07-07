@@ -14,19 +14,21 @@
 #   3. Clona este template (se ainda não estiver rodando de dentro dele)
 #   4. Roda o setup.sh (clona o netbox-docker oficial + aplica o overlay)
 #   5. Gera (ou pergunta) a senha/token do superusuário
-#   6. Sobe também o servidor Diode (stack separada) por padrão -- todo
-#      cliente novo já sai com Diode + Orb Agent prontos pra usar, use
-#      ou não. Preenche o plugins.py do NetBox com as credenciais
-#      geradas e já deixa orb-agent/agent.yaml pronto (só falta editar
-#      os "targets"), antes de buildar -- ver seção 2.3 do README.
-#      Continua a instalação normalmente mesmo se isso falhar (não deve
-#      travar o NetBox em si). Desative com WITH_DIODE=false / --no-diode.
-#   7. Builda a imagem e sobe a stack — a 1ª subida roda uma leva grande
-#      de migrations e pode levar vários minutos; o healthcheck do
-#      netbox (ver docker-compose.override.yml) foi ajustado com
-#      tolerância extra pra isso, então o `docker compose up -d` espera
-#      sozinho até ficar saudável, sem imprimir erro de dependência no
-#      meio do caminho.
+#   6. Diode (stack separada, opcional) -- DESLIGADO por padrão. O
+#      caminho recomendado pra descoberta/enriquecimento é
+#      automation-scripts/discovery_netbox.py (SSH/SNMP direto via API
+#      do NetBox, sem depender de nenhum serviço externo -- ver seção
+#      2.4 do README). Ligue com WITH_DIODE=true / --with-diode se
+#      quiser mesmo assim (ex: pra descoberta rasa via Orb Agent).
+#   7. Builda a imagem e sobe a stack (inclui a discovery-ui, interface
+#      web de descoberta em http://SEU_SERVIDOR:5050 -- login simples,
+#      pensada pro time comercial revisar/aprovar descobertas sem usar
+#      terminal) — a 1ª subida roda uma leva grande de migrations e
+#      pode levar vários minutos; o healthcheck do netbox (ver
+#      docker-compose.override.yml) foi ajustado com tolerância extra
+#      pra isso, então o `docker compose up -d` espera sozinho até
+#      ficar saudável, sem imprimir erro de dependência no meio do
+#      caminho.
 #
 # Testado em Ubuntu/Debian. Em outras distros, os passos 1-2 podem
 # precisar de ajuste manual (o script avisa e continua mesmo assim).
@@ -39,26 +41,32 @@
 #                          nunca commitar ela no repositório público.
 #   SUPERUSER_API_TOKEN -> default: gera token aleatório (hex 40 chars).
 #   SUPERUSER_API_KEY   -> default: gera key aleatória (hex 32 chars).
-#   WITH_DIODE          -> default: true. Diode já sobe junto por
-#                          padrão em todo cliente novo. Defina "false"
-#                          pra pular (equivalente à flag --no-diode
-#                          abaixo -- use a variável quando rodar via
-#                          "curl | bash", já que nesse modo passar flag
-#                          pro script exige a sintaxe mais chata
-#                          "curl ... | bash -s -- --no-diode").
+#   DISCOVERY_UI_PASSWORD -> default: gera senha aleatória. Senha de
+#                          login da interface web de descoberta
+#                          (discovery-ui, porta 5050) -- usuário fixo
+#                          "admin" (troque DISCOVERY_UI_USER no .env se
+#                          quiser outro).
+#   WITH_DIODE          -> default: false. Diode NÃO sobe por padrão --
+#                          o caminho recomendado de descoberta é
+#                          discovery_netbox.py (seção 2.4 do README).
+#                          Defina "true" pra ligar (equivalente à flag
+#                          --with-diode abaixo -- use a variável quando
+#                          rodar via "curl | bash", já que nesse modo
+#                          passar flag pro script exige a sintaxe mais
+#                          chata "curl ... | bash -s -- --with-diode").
 #   DIODE_DIR           -> default: /opt/diode
 #
 # Flags (só funcionam rodando o arquivo direto, ex: ./bootstrap.sh
-# --no-diode -- veja WITH_DIODE acima pro modo curl|bash):
-#   --no-diode    desativa o Diode (equivale a WITH_DIODE=false)
-#   --with-diode  força ligado (já é o padrão, existe só por clareza)
+# --with-diode -- veja WITH_DIODE acima pro modo curl|bash):
+#   --with-diode  liga o Diode (equivale a WITH_DIODE=true)
+#   --no-diode    força desligado (já é o padrão, existe só por clareza)
 # ==========================================================================
 set -euo pipefail
 
 TEMPLATE_REPO_URL="${TEMPLATE_REPO_URL:-https://github.com/andersmonteiro/netbox-2.0.git}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/netbox-2.0}"
 DIODE_DIR="${DIODE_DIR:-/opt/diode}"
-WITH_DIODE="${WITH_DIODE:-true}"
+WITH_DIODE="${WITH_DIODE:-false}"
 for _arg in "$@"; do
     case "$_arg" in
         --with-diode) WITH_DIODE=true ;;
@@ -86,7 +94,7 @@ CURRENT_USER="${SUDO_USER:-$USER}"
 # --------------------------------------------------------------------
 # 1. Dependências de sistema
 # --------------------------------------------------------------------
-log "1/6 Dependências do sistema..."
+log "1/7 Dependências do sistema..."
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "${ID:-}" in
@@ -111,7 +119,7 @@ fi
 # --------------------------------------------------------------------
 # 2. Docker Engine + Compose plugin
 # --------------------------------------------------------------------
-log "2/6 Verificando Docker..."
+log "2/7 Verificando Docker..."
 if ! command -v docker >/dev/null 2>&1; then
     echo "    Docker não encontrado, instalando via script oficial (get.docker.com)..."
     curl -fsSL https://get.docker.com | $SUDO sh
@@ -134,7 +142,7 @@ fi
 # --------------------------------------------------------------------
 # 3. Garantir que temos o template localmente
 # --------------------------------------------------------------------
-log "3/6 Localizando/obtendo o template..."
+log "3/7 Localizando/obtendo o template..."
 # Quando rodado via "curl | bash" não existe arquivo de script real,
 # então BASH_SOURCE[0] vem vazio -- com "set -u" isso quebraria sem o
 # ":-" abaixo. Nesse caso SCRIPT_DIR cai pro diretório atual (ex:
@@ -170,7 +178,7 @@ chmod +x setup.sh bootstrap.sh 2>/dev/null || true
 # --------------------------------------------------------------------
 # 4. setup.sh: clona netbox-docker oficial + aplica overlay + cria .env
 # --------------------------------------------------------------------
-log "4/6 Preparando a stack..."
+log "4/7 Preparando a stack..."
 ./setup.sh
 
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
@@ -232,6 +240,7 @@ if grep -q "troque-este-token-de-40-caracteres" "$ENV_FILE" 2>/dev/null; then
     sed -i "s|SUPERUSER_API_TOKEN=troque-este-token-de-40-caracteres|SUPERUSER_API_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
     sed -i "s|NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
     sed -i "s|MCP_NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|MCP_NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
+    sed -i "s|DISCOVERY_UI_NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|DISCOVERY_UI_NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
 fi
 # A partir do NetBox 4.3 (token de API "v2"), SUPERUSER_API_TOKEN sozinho
 # não cria o token -- precisa também de SUPERUSER_API_KEY.
@@ -243,6 +252,26 @@ if grep -q "troque-esta-chave-de-32-caracteres" "$ENV_FILE" 2>/dev/null; then
         FINAL_API_KEY="$(openssl rand -hex 16)"
     fi
     sed -i "s|SUPERUSER_API_KEY=troque-esta-chave-de-32-caracteres|SUPERUSER_API_KEY=${FINAL_API_KEY}|" "$ENV_FILE"
+fi
+
+# --------------------------------------------------------------------
+# Credenciais da discovery-ui (interface web de descoberta) -- login
+# simples, não integrado ao NetBox, pro time comercial revisar/aprovar
+# descobertas sem precisar de terminal. Mesma lógica de geração
+# automática das credenciais do superusuário acima.
+# --------------------------------------------------------------------
+if grep -q "troque-esta-senha" "$ENV_FILE" 2>/dev/null; then
+    if [ -n "${DISCOVERY_UI_PASSWORD:-}" ]; then
+        FINAL_DISCOVERY_UI_PASSWORD="$DISCOVERY_UI_PASSWORD"
+        echo "    Usando DISCOVERY_UI_PASSWORD fornecido via variável de ambiente."
+    else
+        FINAL_DISCOVERY_UI_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')"
+    fi
+    sed -i "s|DISCOVERY_UI_PASSWORD=troque-esta-senha|DISCOVERY_UI_PASSWORD=${FINAL_DISCOVERY_UI_PASSWORD}|" "$ENV_FILE"
+fi
+if grep -q "DISCOVERY_UI_SECRET_KEY=troque-esta-chave-aleatoria" "$ENV_FILE" 2>/dev/null; then
+    FINAL_DISCOVERY_UI_SECRET_KEY="$(openssl rand -hex 24)"
+    sed -i "s|DISCOVERY_UI_SECRET_KEY=troque-esta-chave-aleatoria|DISCOVERY_UI_SECRET_KEY=${FINAL_DISCOVERY_UI_SECRET_KEY}|" "$ENV_FILE"
 fi
 
 # --------------------------------------------------------------------
@@ -483,7 +512,12 @@ Usuário:       $(grep '^SUPERUSER_NAME=' "$ENV_FILE" | cut -d= -f2)
 Senha:         $(grep '^SUPERUSER_PASSWORD=' "$ENV_FILE" | cut -d= -f2)
 API Token:     $(grep '^SUPERUSER_API_TOKEN=' "$ENV_FILE" | cut -d= -f2)
 
-*** Anote a senha e o token acima agora — eles não aparecem de novo. ***
+Descoberta de rede (interface web, sem Diode):
+URL:           http://${SERVER_IP:-SEU_SERVIDOR}:5050
+Usuário:       $(grep '^DISCOVERY_UI_USER=' "$ENV_FILE" | cut -d= -f2)
+Senha:         $(grep '^DISCOVERY_UI_PASSWORD=' "$ENV_FILE" | cut -d= -f2)
+
+*** Anote as senhas e o token acima agora — eles não aparecem de novo. ***
 
 Pendências que exigem dado real do cliente (edite $ENV_FILE e reinicie
 os containers depois com: cd $REPO_DIR/netbox-docker && docker compose up -d):

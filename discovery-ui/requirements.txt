@@ -1,0 +1,5 @@
+flask>=3.0,<4
+gunicorn>=22.0
+pynetbox>=7.4,<8
+napalm>=5.0
+python-dotenv>=1.0

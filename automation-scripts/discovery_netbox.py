@@ -2,11 +2,15 @@
 """
 discovery_netbox.py
 ====================
-"Facilitador" de descoberta: lê Devices do NetBox que tiverem os custom
-fields de descoberta preenchidos (ver create_discovery_fields.py),
-coleta dados reais via SSH (NAPALM) ou SNMP (SNMPv2c), grava o
-resultado em JSON para revisão humana, e só aplica no NetBox depois de
+CLI de descoberta: lê Devices do NetBox que tiverem os custom fields de
+descoberta preenchidos (ver create_discovery_fields.py), coleta dados
+reais via SSH (NAPALM) ou SNMP (SNMPv2c) usando discovery_core.py, grava
+o resultado em JSON para revisão humana, e só aplica no NetBox depois de
 confirmação explícita.
+
+Existe também uma interface web equivalente (discovery-ui/), pensada pra
+quem não usa terminal -- ver seção 2.4 do README. Este CLI continua
+funcionando igual, pra automação/cron.
 
 Fluxo (dois comandos separados, de propósito -- nada é gravado no
 NetBox sem passar pelo "apply"):
@@ -40,237 +44,17 @@ Variáveis de ambiente: NETBOX_URL, NETBOX_TOKEN (ou .env)
 
 import argparse
 import json
-import os
-import re
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pynetbox
 from dotenv import load_dotenv
+
+import discovery_core as core
 
 load_dotenv()
 
-NETBOX_URL = os.environ.get("NETBOX_URL")
-NETBOX_TOKEN = os.environ.get("NETBOX_TOKEN")
-
 OUTPUT_DIR = Path(__file__).parent / "discovery_output"
 APPLIED_DIR = OUTPUT_DIR / "applied"
-
-# OIDs padrão da MIB-II (RFC 1213) -- suficiente pra hostname/descrição/
-# interfaces sem depender de MIB proprietária de fabricante.
-OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
-OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
-OID_IF_DESCR = "1.3.6.1.2.1.2.2.1.2"
-OID_IF_NAME = "1.3.6.1.2.1.31.1.1.1.1"  # ifXTable -- nome mais legível, quando o device suporta
-OID_IF_ADMIN_STATUS = "1.3.6.1.2.1.2.2.1.7"
-OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"
-
-
-def get_client() -> pynetbox.api:
-    if not NETBOX_URL or not NETBOX_TOKEN:
-        sys.exit("Defina NETBOX_URL e NETBOX_TOKEN (variáveis de ambiente ou .env).")
-    return pynetbox.api(NETBOX_URL, token=NETBOX_TOKEN)
-
-
-# --------------------------------------------------------------------
-# SNMP (via snmpget/snmpwalk do pacote `snmp` -- evita depender de lib
-# Python de SNMP, que costuma dar dor de cabeça de versão/instalação;
-# mesmo padrão do discover_network.py, que já shella pro `nmap`)
-# --------------------------------------------------------------------
-
-def _snmp_cmd(binary, host, community, oid, timeout, retries):
-    return [
-        binary, "-v2c", "-c", community,
-        "-O", "qn",  # q = sem "Type:"/enum verboso na saída, n = OID numérico
-        "-t", str(timeout), "-r", str(retries),
-        host, oid,
-    ]
-
-
-def snmp_get(host, community, oid, timeout=5, retries=1):
-    cmd = _snmp_cmd("snmpget", host, community, oid, timeout, retries)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * (retries + 1) + 5)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "snmpget falhou (sem stderr)")
-    line = result.stdout.strip()
-    if not line:
-        return None
-    _, _, value = line.partition(" ")
-    return value.strip().strip('"')
-
-
-def snmp_walk(host, community, oid, timeout=5, retries=1):
-    """Retorna dict {indice_da_tabela: valor} a partir de um walk."""
-    cmd = _snmp_cmd("snmpwalk", host, community, oid, timeout, retries)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * (retries + 1) + 15)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "snmpwalk falhou (sem stderr)")
-    out = {}
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        oid_full, _, value = line.partition(" ")
-        idx = oid_full.rsplit(".", 1)[-1]  # último componente do OID = ifIndex
-        out[idx] = value.strip().strip('"')
-    return out
-
-
-def _normalize_status(raw):
-    """Aceita tanto '1'/'2' quanto 'up(1)'/'down(2)' (varia conforme o
-    device e a versão do net-snmp instalada)."""
-    if raw is None:
-        return "unknown"
-    raw = raw.strip().lower()
-    if raw.startswith("1") or "up" in raw:
-        return "up"
-    if raw.startswith("2") or "down" in raw:
-        return "down"
-    return "unknown"
-
-
-# --------------------------------------------------------------------
-# Normalização de nome de interface -- necessário porque o Device Type
-# no NetBox costuma já vir com um Interface Template (ex: NE8000 com
-# 48 portas pré-cadastradas como "GigabitEthernet0/0/1"), mas o que
-# volta da descoberta (SSH via NAPALM, ou SNMP via ifDescr/ifName) pode
-# usar abreviação diferente (ex: "Gi0/0/1" ou "GE0/0/1"). Comparação de
-# string exata faria o apply() achar que são portas diferentes e criar
-# uma interface NOVA duplicada (tipo "other") em vez de reaproveitar a
-# porta que o template já criou. Normalizamos os dois lados (nome já
-# existente no NetBox E nome descoberto) pra um formato canônico antes
-# de comparar -- best-effort, cobre as abreviações mais comuns
-# (Cisco/Arista/Huawei-like); não cobre 100% dos vendors.
-# --------------------------------------------------------------------
-_IFACE_ABBREV = [
-    ("tengigabitethernet", "tengigabitethernet"),
-    ("tengige", "tengigabitethernet"),
-    ("tengig", "tengigabitethernet"),
-    ("te", "tengigabitethernet"),
-    ("gigabitethernet", "gigabitethernet"),
-    ("gige", "gigabitethernet"),
-    ("gig", "gigabitethernet"),
-    ("ge", "gigabitethernet"),
-    ("gi", "gigabitethernet"),
-    ("fastethernet", "fastethernet"),
-    ("fa", "fastethernet"),
-    ("ethernet", "ethernet"),
-    ("eth", "ethernet"),
-    ("et", "ethernet"),
-    ("port-channel", "portchannel"),
-    ("portchannel", "portchannel"),
-    ("po", "portchannel"),
-    ("loopback", "loopback"),
-    ("lo", "loopback"),
-    ("vlan", "vlan"),
-    ("vl", "vlan"),
-    ("management", "management"),
-    ("mgmt", "management"),
-    ("ma", "management"),
-]
-_IFACE_ABBREV_SORTED = sorted(_IFACE_ABBREV, key=lambda pair: -len(pair[0]))
-
-
-def _normalize_ifname(name):
-    """'Gi0/0/1' e 'GigabitEthernet0/0/1' -> mesma string normalizada."""
-    if not name:
-        return ""
-    s = name.strip().lower()
-    m = re.match(r"^([a-z\-]+)(.*)$", s)
-    if not m:
-        return re.sub(r"[^a-z0-9]", "", s)
-    prefix, rest = m.group(1), m.group(2)
-    rest_clean = re.sub(r"[^a-z0-9]", "", rest)
-    for abbrev, full in _IFACE_ABBREV_SORTED:
-        if prefix == abbrev:
-            return f"{full}{rest_clean}"
-    return f"{re.sub(r'[^a-z0-9]', '', prefix)}{rest_clean}"
-
-
-def collect_snmp(device, community, timeout=5, retries=1):
-    host = str(device.primary_ip4).split("/")[0] if device.primary_ip4 else None
-    if not host:
-        return {"method": "snmp", "errors": ["sem IP de gerência (primary_ip4)"]}
-
-    data = {"method": "snmp", "host": host, "errors": []}
-    try:
-        data["sys_name"] = snmp_get(host, community, OID_SYS_NAME, timeout, retries)
-        data["sys_descr"] = snmp_get(host, community, OID_SYS_DESCR, timeout, retries)
-
-        if_descr = snmp_walk(host, community, OID_IF_DESCR, timeout, retries)
-        if_name = snmp_walk(host, community, OID_IF_NAME, timeout, retries)
-        admin_status = snmp_walk(host, community, OID_IF_ADMIN_STATUS, timeout, retries)
-        oper_status = snmp_walk(host, community, OID_IF_OPER_STATUS, timeout, retries)
-
-        interfaces = []
-        for idx, descr in if_descr.items():
-            interfaces.append(
-                {
-                    "index": idx,
-                    "name": if_name.get(idx) or descr,
-                    "descr": descr,
-                    "admin_status": _normalize_status(admin_status.get(idx)),
-                    "oper_status": _normalize_status(oper_status.get(idx)),
-                }
-            )
-        data["interfaces"] = interfaces
-    except Exception as exc:
-        data["errors"].append(str(exc))
-    return data
-
-
-# --------------------------------------------------------------------
-# SSH / NAPALM (mesma lógica do napalm_collect.py, mas com credencial
-# por device em vez de usuário/senha único via CLI)
-# --------------------------------------------------------------------
-
-def collect_ssh(device, username, password):
-    from napalm import get_network_driver  # import tardio: só quem usar SSH precisa do napalm
-
-    if not device.platform:
-        return {"method": "ssh", "errors": ["sem 'platform' definido (driver NAPALM)"]}
-    if not device.primary_ip4:
-        return {"method": "ssh", "errors": ["sem IP de gerência (primary_ip4)"]}
-
-    host = str(device.primary_ip4).split("/")[0]
-    driver_name = device.platform.slug
-    data = {"method": "ssh", "host": host, "errors": []}
-
-    try:
-        driver = get_network_driver(driver_name)
-    except Exception as exc:
-        data["errors"].append(f"driver NAPALM '{driver_name}' inválido: {exc}")
-        return data
-
-    conn = driver(hostname=host, username=username, password=password)
-    try:
-        conn.open()
-        facts = conn.get_facts()
-        napalm_interfaces = conn.get_interfaces()
-    except Exception as exc:
-        data["errors"].append(f"falha ao conectar: {exc}")
-        return data
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    data["serial"] = facts.get("serial_number") or None
-    data["os_version"] = facts.get("os_version") or None
-    data["interfaces"] = [
-        {
-            "name": name,
-            "descr": info.get("description") or "",
-            "admin_status": "up" if info.get("is_enabled") else "down",
-            "oper_status": "up" if info.get("is_up") else "down",
-            "mac_address": info.get("mac_address") or None,
-        }
-        for name, info in napalm_interfaces.items()
-    ]
-    return data
 
 
 # --------------------------------------------------------------------
@@ -278,7 +62,7 @@ def collect_ssh(device, username, password):
 # --------------------------------------------------------------------
 
 def cmd_collect(args):
-    nb = get_client()
+    nb = core.get_client()
     filters = {}
     if args.site:
         filters["site"] = args.site
@@ -303,22 +87,10 @@ def cmd_collect(args):
         method = cf.get("discovery_method")
         print(f"--- {device.name} ({method}) ---")
 
-        if method == "ssh":
-            username = cf.get("discovery_username")
-            password = cf.get("discovery_password")
-            if not username or not password:
-                print("  [pulado] discovery_method=ssh mas falta usuário/senha nos custom fields")
-                continue
-            result = collect_ssh(device, username, password)
-        elif method == "snmp":
-            community = cf.get("discovery_snmp_community")
-            if not community:
-                print("  [pulado] discovery_method=snmp mas falta a community nos custom fields")
-                continue
-            result = collect_snmp(device, community, timeout=args.snmp_timeout, retries=args.snmp_retries)
-        else:
-            print(f"  [pulado] discovery_method='{method}' desconhecido (use 'ssh' ou 'snmp')")
-            continue
+        result = core.collect_device(
+            device, method, cf,
+            snmp_timeout=args.snmp_timeout, snmp_retries=args.snmp_retries,
+        )
 
         result["device_id"] = device.id
         result["device_name"] = device.name
@@ -357,7 +129,7 @@ def cmd_apply(args):
         print(f"Nada pra aplicar em {OUTPUT_DIR}/ (rode 'collect' primeiro).")
         return
 
-    nb = get_client()
+    nb = core.get_client()
     json_files = sorted(OUTPUT_DIR.glob("*.json"))
 
     print(f"{len(json_files)} arquivo(s) pendente(s):")
@@ -381,48 +153,7 @@ def cmd_apply(args):
             print(f"[erro] {device_name}: device_id {device_id} não encontrado mais no NetBox, pulando")
             continue
 
-        changes = []
-
-        serial = data.get("serial")
-        if serial and serial != device.serial:
-            device.update({"serial": serial})
-            changes.append(f"serial={serial}")
-
-        existing_if = list(nb.dcim.interfaces.filter(device_id=device.id))
-        existing_by_norm = {_normalize_ifname(i.name): i for i in existing_if}
-        created, updated, matched_norm = 0, 0, 0
-        for iface in data.get("interfaces", []):
-            name = iface.get("name")
-            if not name:
-                continue
-            enabled = iface.get("admin_status") == "up"
-            description = iface.get("descr") or ""
-            nb_if = existing_by_norm.get(_normalize_ifname(name))
-            if nb_if:
-                if nb_if.name != name:
-                    matched_norm += 1
-                    print(f"  [interface] '{name}' descoberto == '{nb_if.name}' já existente (nome normalizado)")
-                if nb_if.enabled != enabled or (description and nb_if.description != description):
-                    nb_if.update({"enabled": enabled, "description": description or nb_if.description})
-                    updated += 1
-            else:
-                nb.dcim.interfaces.create(
-                    {
-                        "device": device.id,
-                        "name": name,
-                        "type": "other",
-                        "enabled": enabled,
-                        "description": description,
-                        "mac_address": iface.get("mac_address") or None,
-                    }
-                )
-                created += 1
-        if created:
-            changes.append(f"{created} interface(s) criada(s)")
-        if updated:
-            changes.append(f"{updated} interface(s) atualizada(s)")
-        if matched_norm:
-            changes.append(f"{matched_norm} casada(s) por nome normalizado")
+        changes = core.apply_device_result(nb, device, data)
 
         if changes:
             print(f"[aplicado] {device_name}: {', '.join(changes)}")

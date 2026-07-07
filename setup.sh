@@ -33,6 +33,10 @@ mkdir -p "$NETBOX_DOCKER_DIR/configuration"
 cp "$REPO_DIR/configuration/plugins.py" "$NETBOX_DOCKER_DIR/configuration/plugins.py"
 cp -r "$REPO_DIR/automation-scripts" "$NETBOX_DOCKER_DIR/"
 cp -r "$REPO_DIR/zabbix-sync" "$NETBOX_DOCKER_DIR/"
+# discovery-ui precisa estar aqui dentro porque o docker compose (rodado
+# de dentro de netbox-docker/) usa build.context: "." -- sem isso o
+# "COPY discovery-ui/..." do Dockerfile não acha os arquivos.
+cp -r "$REPO_DIR/discovery-ui" "$NETBOX_DOCKER_DIR/"
 
 if [ ! -f "$NETBOX_DOCKER_DIR/.env" ]; then
     echo "==> Criando .env a partir de .env.example (edite antes de subir!)"

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Revisão · Descoberta de Rede{% endblock %}
+{% block content %}
+<h1>Revisão de descobertas</h1>
+<p class="muted">Nada foi gravado no NetBox ainda. Desmarque as interfaces que não quer enviar, ajuste a descrição se precisar, e clique em Aprovar.</p>
+
+{% if not items %}
+<div class="card">
+  <p class="muted">Nada pendente de revisão. Volte pra <a class="link" href="{{ url_for('dashboard') }}">Devices</a> e rode uma descoberta.</p>
+</div>
+{% endif %}
+
+{% for item in items %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h2>{{ item.data.device_name }} <span class="badge method">{{ item.data.method|upper }}</span></h2>
+    <span class="muted">{{ item.n_interfaces }} interface(s), {{ item.n_up }} up</span>
+  </div>
+
+  {% if item.data.sys_name %}<p class="muted">sys_name: {{ item.data.sys_name }}</p>{% endif %}
+  {% if item.data.serial %}<p class="muted">serial: {{ item.data.serial }}</p>{% endif %}
+
+  {% if item.data.errors %}
+    {% for err in item.data.errors %}
+      <div class="flash error">{{ err }}</div>
+    {% endfor %}
+  {% endif %}
+
+  {% if item.data.interfaces %}
+  <form method="post" action="{{ url_for('review_apply', filename=item.filename) }}">
+    <table>
+      <thead>
+        <tr>
+          <th><input type="checkbox" checked onclick="this.closest('table').querySelectorAll('.if-cb').forEach(c => c.checked = this.checked)"></th>
+          <th>Interface</th>
+          <th>Status</th>
+          <th>Descrição</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for iface in item.data.interfaces %}
+        <tr>
+          <td>
+            <input type="hidden" name="iface_name_{{ loop.index0 }}" value="{{ iface.name }}">
+            <input type="checkbox" class="if-cb" name="include_{{ loop.index0 }}" checked>
+          </td>
+          <td>{{ iface.name }}</td>
+          <td>
+            <span class="badge {{ 'up' if iface.oper_status == 'up' else 'down' }}">{{ iface.oper_status }}</span>
+          </td>
+          <td><input type="text" name="desc_{{ loop.index0 }}" value="{{ iface.descr or '' }}"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="margin-top: 14px;">
+      <button type="submit">Aprovar e gravar no NetBox</button>
+    </div>
+  </form>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('review_discard', filename=item.filename) }}" style="margin-top: 8px;" onsubmit="return confirm('Descartar essa descoberta sem gravar nada no NetBox?');">
+    <button type="submit" class="secondary">Descartar</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}
