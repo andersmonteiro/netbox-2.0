@@ -84,11 +84,20 @@ existir) e sobe a stack com `docker compose build --no-cache && docker
 compose up -d`.
 
 **Antes de rodar com `--up` pela primeira vez**, edite
-`netbox-docker/.env` com os dados reais do cliente (gere o
-`SUPERUSER_API_TOKEN` com `openssl rand -hex 20`, por exemplo). Se
-preferir revisar antes de subir, rode só `./setup.sh` (sem `--up`),
-edite o `.env` com calma, e depois `cd netbox-docker && docker compose
-up -d`.
+`netbox-docker/.env` com os dados reais do cliente (gere
+`SUPERUSER_API_TOKEN` e `SUPERUSER_API_KEY` com `openssl rand -hex 20`
+e `openssl rand -hex 16`, por exemplo). Se preferir revisar antes de
+subir, rode só `./setup.sh` (sem `--up`), edite o `.env` com calma, e
+depois `cd netbox-docker && docker compose up -d`.
+
+> **Não apague a linha `SKIP_SUPERUSER=false` do `.env`.** O
+> `netbox-docker` vem com esse valor em `true` por padrão — se essa
+> linha sumir do seu `.env`, o container sobe normalmente mas o
+> usuário `admin` nunca é criado, e o login falha silenciosamente (a
+> senha existe no arquivo, só que não foi usada por ninguém). Se isso
+> acontecer: confira que `SKIP_SUPERUSER=false` e `SUPERUSER_API_KEY`
+> estão no `.env`, depois `docker compose up -d --force-recreate
+> netbox`.
 
 Acesse `http://SEU_SERVIDOR:8000` depois de alguns minutos.
 

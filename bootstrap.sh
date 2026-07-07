@@ -151,6 +151,12 @@ if grep -q "troque-este-token-de-40-caracteres" "$ENV_FILE" 2>/dev/null; then
     sed -i "s|NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|NETBOX_TOKEN=${NEW_TOKEN}|" "$ENV_FILE"
     sed -i "s|MCP_NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|MCP_NETBOX_TOKEN=${NEW_TOKEN}|" "$ENV_FILE"
 fi
+# A partir do NetBox 4.3 (token de API "v2"), SUPERUSER_API_TOKEN sozinho
+# não cria o token -- precisa também de SUPERUSER_API_KEY.
+if grep -q "troque-esta-chave-de-32-caracteres" "$ENV_FILE" 2>/dev/null; then
+    NEW_API_KEY="$(openssl rand -hex 16)"
+    sed -i "s|SUPERUSER_API_KEY=troque-esta-chave-de-32-caracteres|SUPERUSER_API_KEY=${NEW_API_KEY}|" "$ENV_FILE"
+fi
 
 # --------------------------------------------------------------------
 # 5. Build da imagem e subida da stack
