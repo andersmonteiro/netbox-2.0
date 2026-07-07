@@ -451,6 +451,22 @@ aplicar automático via Diode). Reaproveita a mesma ideia do
 fonte da lista de alvos+credenciais, e um passo explícito de
 confirmação no meio.
 
+```mermaid
+flowchart TD
+    NB["NetBox<br/>Custom fields, IP, Platform"] --> C["collect<br/>lê custom fields do device"]
+    C --> SSH["SSH (NAPALM)<br/>usuário + senha"]
+    C --> SNMP["SNMP (v2c)<br/>community"]
+    SSH --> EQ["Equipamento real<br/>na rede do cliente"]
+    SNMP --> EQ
+    EQ --> J["JSON<br/>1 arquivo por device"]
+    J --> R["Revisão humana<br/>edita antes de aplicar"]
+    R --> A["apply<br/>grava no NetBox"]
+    A -. "Interfaces + Serial" .-> NB
+```
+
+O NetBox nunca é alterado direto pelo `collect` — sempre passa por um
+arquivo JSON no meio, com chance de revisão humana antes do `apply`.
+
 Passo 1 — criar os Custom Fields de descoberta (uma vez só, por
 instalação):
 
