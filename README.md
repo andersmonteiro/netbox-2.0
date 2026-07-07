@@ -65,10 +65,17 @@ curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/boot
 No final ele imprime a URL, usuário, senha e token gerados — anote na
 hora, não aparecem de novo.
 
-**Usando uma senha/token fixos (ex: padrão da empresa)**: por padrão a
-senha e os tokens são gerados aleatoriamente a cada instalação — o
-repositório público nunca tem um valor fixo real. Se você quiser usar
-sempre a mesma credencial de produção em todos os clientes, exporte as
+**Senha do superusuário**: durante a instalação, se você não tiver
+exportado `SUPERUSER_PASSWORD` antes, o script pergunta a senha
+interativamente (digitação oculta, como em `sudo`). Basta digitar e dar
+Enter para usar essa senha, ou só dar Enter em branco para gerar uma
+aleatória. Funciona normalmente mesmo rodando via `curl | bash`.
+
+**Usando sempre a mesma senha/token (ex: padrão da empresa)**: por
+padrão a senha e os tokens são gerados aleatoriamente (ou perguntados,
+no caso da senha) a cada instalação — o repositório público nunca tem
+um valor fixo real. Se você quiser pular a pergunta e usar sempre a
+mesma credencial de produção em todos os clientes, exporte as
 variáveis antes do curl (elas ficam só no seu terminal/onde você
 guardar o comando, nunca no git):
 

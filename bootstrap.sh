@@ -162,11 +162,26 @@ ENV_FILE="$REPO_DIR/netbox-docker/.env"
 #   curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 # --------------------------------------------------------------------
 if grep -q "troque-esta-senha" "$ENV_FILE" 2>/dev/null; then
+    # Se não veio por variável de ambiente, pergunta interativamente.
+    # Funciona mesmo rodando via "curl | bash" porque lemos direto de
+    # /dev/tty (o terminal do usuário), não do stdin do script -- que
+    # nesse modo já está ocupado com o próprio conteúdo baixado pelo
+    # curl. Se não houver terminal disponível (ex: rodando via cron/CI,
+    # sem interação possível), pula direto pra geração aleatória.
+    if [ -z "${SUPERUSER_PASSWORD:-}" ] && [ -r /dev/tty ]; then
+        echo ""
+        read -r -s -p "    Senha do superusuário do NetBox (Enter para gerar uma aleatória): " TYPED_PASSWORD < /dev/tty || TYPED_PASSWORD=""
+        echo ""
+        if [ -n "$TYPED_PASSWORD" ]; then
+            SUPERUSER_PASSWORD="$TYPED_PASSWORD"
+        fi
+    fi
     if [ -n "${SUPERUSER_PASSWORD:-}" ]; then
         FINAL_PASSWORD="$SUPERUSER_PASSWORD"
-        echo "    Usando SUPERUSER_PASSWORD fornecido via variável de ambiente."
+        echo "    Usando a senha fornecida."
     else
         FINAL_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')"
+        echo "    Nenhuma senha fornecida -- gerando uma aleatória."
     fi
     sed -i "s|SUPERUSER_PASSWORD=troque-esta-senha|SUPERUSER_PASSWORD=${FINAL_PASSWORD}|" "$ENV_FILE"
 fi
@@ -199,41 +214,49 @@ fi
 log "5/6 Build da imagem (com plugins)..."
 (cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache)
 
-log "6/6 Subindo a stack..."
-# Não deixamos o "set -e" abortar aqui: na primeira subida o compose
-# pode retornar erro porque o netbox ainda não ficou "healthy" dentro
-# do tempo que ele espera por padrão -- isso NÃO significa que quebrou,
-# só que ainda está migrando o banco. A gente espera de verdade abaixo.
-(cd "$REPO_DIR/netbox-docker" && docker compose up -d) || true
+log "6/6 Subindo a stack (isso pode levar vários minutos na 1ª vez -- o NetBox roda uma leva grande de migrations antes de virar 'healthy')..."
+MAX_WAIT=1200   # 20 minutos
 
-NETBOX_CID="$(cd "$REPO_DIR/netbox-docker" && docker compose ps -q netbox 2>/dev/null)"
-if [ -z "$NETBOX_CID" ]; then
-    warn "Não encontrei o container do netbox rodando. Confira manualmente com:
-    cd $REPO_DIR/netbox-docker && docker compose ps && docker compose logs netbox"
+# "--wait --wait-timeout" faz o compose esperar de verdade até tudo
+# ficar healthy/rodando, em vez de desistir cedo com a mensagem
+# "Error dependency netbox failed to start" (isso NÃO é uma falha real
+# -- é só o comportamento padrão do compose quando o netbox ainda não
+# terminou as migrations dentro do tempo de espera padrão dele).
+# Requer Docker Compose 2.17+; se a versão instalada for mais antiga,
+# cai pro método antigo de polling manual abaixo.
+if (cd "$REPO_DIR/netbox-docker" && docker compose up -d --wait --wait-timeout "$MAX_WAIT"); then
+    echo "    Stack no ar e saudável."
 else
-    echo "    Aguardando o NetBox ficar saudável (1ª subida = muitas migrations, pode levar vários minutos)..."
-    WAITED=0
-    MAX_WAIT=1200   # 20 minutos
-    while true; do
-        STATUS="$(docker inspect --format='{{.State.Health.Status}}' "$NETBOX_CID" 2>/dev/null || echo unknown)"
-        if [ "$STATUS" = "healthy" ]; then
-            echo "    NetBox healthy depois de ${WAITED}s."
-            break
-        fi
-        if [ "$WAITED" -ge "$MAX_WAIT" ]; then
-            warn "NetBox não ficou 'healthy' em $((MAX_WAIT/60)) minutos (status atual: $STATUS).
-    Vou continuar mesmo assim -- acompanhe com: docker logs -f $NETBOX_CID"
-            break
-        fi
-        sleep 10
-        WAITED=$((WAITED+10))
-        echo "    ... ainda subindo (${WAITED}s, status atual: $STATUS)"
-    done
+    warn "'docker compose up -d --wait' não confirmou tudo saudável em $((MAX_WAIT/60)) minutos (ou a versão do Docker Compose instalada não suporta --wait). Tentando o método de espera manual..."
 
-    # Agora que o netbox está de pé (ou desistimos de esperar), sobe o
-    # que ficou pra trás -- netbox-worker/netbox-housekeeping dependem
-    # do netbox estar saudável pra iniciar.
-    (cd "$REPO_DIR/netbox-docker" && docker compose up -d) || warn "docker compose up -d retornou erro na segunda tentativa. Confira com: cd $REPO_DIR/netbox-docker && docker compose ps"
+    (cd "$REPO_DIR/netbox-docker" && docker compose up -d) || true
+    NETBOX_CID="$(cd "$REPO_DIR/netbox-docker" && docker compose ps -q netbox 2>/dev/null)"
+    if [ -z "$NETBOX_CID" ]; then
+        warn "Não encontrei o container do netbox rodando. Confira manualmente com:
+    cd $REPO_DIR/netbox-docker && docker compose ps && docker compose logs netbox"
+    else
+        WAITED=0
+        while true; do
+            STATUS="$(docker inspect --format='{{.State.Health.Status}}' "$NETBOX_CID" 2>/dev/null || echo unknown)"
+            if [ "$STATUS" = "healthy" ]; then
+                echo "    NetBox healthy depois de ${WAITED}s."
+                break
+            fi
+            if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+                warn "NetBox não ficou 'healthy' em $((MAX_WAIT/60)) minutos (status atual: $STATUS).
+    Vou continuar mesmo assim -- acompanhe com: docker logs -f $NETBOX_CID"
+                break
+            fi
+            sleep 10
+            WAITED=$((WAITED+10))
+            echo "    ... ainda subindo (${WAITED}s, status atual: $STATUS)"
+        done
+
+        # Agora que o netbox está de pé (ou desistimos de esperar), sobe o
+        # que ficou pra trás -- netbox-worker/netbox-housekeeping dependem
+        # do netbox estar saudável pra iniciar.
+        (cd "$REPO_DIR/netbox-docker" && docker compose up -d) || warn "docker compose up -d retornou erro na segunda tentativa. Confira com: cd $REPO_DIR/netbox-docker && docker compose ps"
+    fi
 fi
 
 SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
