@@ -101,10 +101,11 @@ if command -v apt-get >/dev/null 2>&1; then
     $SUDO apt-get update -y
     # jq é usado pelo quickstart.sh do Diode (ver seção 2.3 do README) --
     # instalado aqui de cara pra já estar pronto se você for usar Diode
-    # depois, sem precisar voltar e instalar na mão.
-    $SUDO apt-get install -y git curl ca-certificates gnupg nmap python3 python3-venv python3-pip openssl jq
+    # depois, sem precisar voltar e instalar na mão. snmp (snmpget/
+    # snmpwalk) é usado pelo automation-scripts/discovery_netbox.py.
+    $SUDO apt-get install -y git curl ca-certificates gnupg nmap python3 python3-venv python3-pip openssl jq snmp
 else
-    warn "apt-get não encontrado. Instale manualmente: git curl nmap python3 python3-venv python3-pip openssl jq"
+    warn "apt-get não encontrado. Instale manualmente: git curl nmap python3 python3-venv python3-pip openssl jq snmp"
 fi
 
 # --------------------------------------------------------------------

@@ -13,6 +13,14 @@
 # não vendorizamos ele aqui, sempre puxamos a versão mais recente.
 /netbox-docker/
 
+# Config real do Orb Agent (contém client_secret do Diode em texto
+# plano). Só o .example fica versionado.
+orb-agent/agent.yaml
+
+# Saída do discovery_netbox.py -- JSON com IP/interface/hostname reais
+# de cliente, staging antes de aplicar no NetBox.
+automation-scripts/discovery_output/
+
 # Planilhas de importação (dados reais de cliente)
 automation-scripts/planilhas/
 *.xlsx

@@ -31,11 +31,13 @@ netbox-2.0/
 ├── plugin_requirements.txt         <- lista de plugins (pip)
 ├── configuration/
 │   └── plugins.py                  <- plugins habilitados no NetBox
-├── automation-scripts/             <- scripts pynetbox/napalm/nmap
+├── automation-scripts/             <- scripts pynetbox/napalm/nmap/snmp
 │   ├── requirements.txt
 │   ├── import_csv_to_netbox.py     <- importação em massa (CSV/XLSX)
 │   ├── napalm_collect.py           <- coleta via SSH/API (NAPALM)
-│   └── discover_network.py         <- descoberta de rede (nmap, fallback)
+│   ├── discover_network.py         <- descoberta de rede (nmap, fallback)
+│   ├── create_discovery_fields.py  <- cria os custom fields de credencial no NetBox
+│   └── discovery_netbox.py         <- lê credencial do NetBox, coleta SSH/SNMP, revisão em JSON, aplica
 ├── zabbix-sync/
 │   └── config.py                   <- config do netbox-zabbix-sync
 └── orb-agent/
@@ -438,6 +440,70 @@ https://netboxlabs.com/docs/orb-agent/config_samples.
 > Limited Use License 1.0" (não é Apache/MIT) — gratuito para uso, mas
 > vale ler os termos antes de colocar em produção. O Orb Agent está em
 > estágio "Public Preview" (pode mudar).
+
+### 2.4 Enriquecimento a partir de credenciais cadastradas no NetBox
+
+Alternativa ao Orb Agent pros casos em que você quer: (a) cadastrar a
+credencial de cada device direto no NetBox (sem editar YAML/reiniciar
+container), e (b) **revisar o resultado antes de gravar** (em vez de
+aplicar automático via Diode). Reaproveita a mesma ideia do
+`device_discovery`/`snmp_discovery` do Orb Agent, mas com o NetBox como
+fonte da lista de alvos+credenciais, e um passo explícito de
+confirmação no meio.
+
+Passo 1 — criar os Custom Fields de descoberta (uma vez só, por
+instalação):
+
+```bash
+cd automation-scripts
+python create_discovery_fields.py
+```
+
+Isso cria em Devices: `discovery_method` (ssh/snmp), `discovery_username`,
+`discovery_password`, `discovery_snmp_community`. Aparecem normalmente
+no formulário de "Adicionar/Editar Device" do NetBox — cadastrar um
+device pra descoberta vira só preencher esses campos ali, sem tocar em
+arquivo nenhum.
+
+> **Aviso de segurança**: são Custom Fields comuns do NetBox community
+> (sem plugin de secrets) — ficam em texto simples, visíveis pra
+> qualquer usuário com permissão de ver aquele Device, inclusive via
+> API. Se isso for um problema no seu ambiente, avalie o plugin
+> `netbox-secrets` (criptografado) em vez destes campos.
+
+Passo 2 — preencher os campos nos devices que quiser descobrir
+(`discovery_method=ssh` + `discovery_username`/`discovery_password`,
+ou `discovery_method=snmp` + `discovery_snmp_community`), e rodar a
+coleta:
+
+```bash
+python discovery_netbox.py collect
+```
+
+Isso conecta em cada device marcado (SSH via NAPALM, mesmo driver do
+`napalm_collect.py`; SNMPv2c via `snmpget`/`snmpwalk` — instale o
+pacote `snmp` do sistema se não usou o `bootstrap.sh`) e grava um JSON
+por device em `discovery_output/` com hostname, interfaces e status
+up/down de cada uma. **Nada é gravado no NetBox ainda.**
+
+Passo 3 — revisar. Os JSON ficam em `discovery_output/`, um por
+device — abra e edite à vontade (corrigir nome de interface, remover
+alguma, etc.) antes do próximo passo. O resumo já impresso no terminal
+também serve pra conferir rápido sem abrir arquivo.
+
+Passo 4 — aplicar no NetBox:
+
+```bash
+python discovery_netbox.py apply
+```
+
+Pede confirmação (`y/N`) antes de gravar — use `apply --yes` se quiser
+pular a pergunta (ex: rodando via cron depois que já confiar no
+processo). Cria as interfaces que faltam, atualiza status/descrição das
+que já existem e o serial do device (quando veio via SSH/NAPALM — SNMP
+não traz serial pela MIB-II padrão). Os arquivos aplicados são movidos
+pra `discovery_output/applied/` (não ficam pendentes de novo se você
+rodar `apply` de novo sem um `collect` novo antes).
 
 ## 3. Integração com Zabbix
 
