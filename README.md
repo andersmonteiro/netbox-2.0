@@ -115,6 +115,14 @@ e `openssl rand -hex 16`, por exemplo). Se preferir revisar antes de
 subir, rode só `./setup.sh` (sem `--up`), edite o `.env` com calma, e
 depois `cd netbox-docker && docker compose up -d`.
 
+**Importante — `CSRF_TRUSTED_ORIGINS`**: também ajuste essa variável no
+`.env` pro endereço real que você vai usar pra acessar o NetBox (ex:
+`CSRF_TRUSTED_ORIGINS=http://192.168.1.10:8000`). O `bootstrap.sh`
+(fluxo acima) faz isso sozinho detectando o IP do servidor; aqui, como
+você está editando o `.env` na mão, precisa colocar você mesmo — sem
+isso a tela de login trava com "403 — A verificação de CSRF falhou"
+mesmo com a senha certa.
+
 > **Não apague a linha `SKIP_SUPERUSER=false` do `.env`.** O
 > `netbox-docker` vem com esse valor em `true` por padrão — se essa
 > linha sumir do seu `.env`, o container sobe normalmente mas o

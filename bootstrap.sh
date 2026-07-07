@@ -143,6 +143,19 @@ log "4/6 Preparando a stack (netbox-docker oficial + overlay deste template)..."
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
 
 # --------------------------------------------------------------------
+# CSRF_TRUSTED_ORIGINS: sem isso o Django barra a TELA DE LOGIN com
+# "403 -- A verificação de CSRF falhou" antes mesmo de checar
+# usuário/senha, quando o acesso é por IP (que é o caso normal aqui).
+# Preenchemos com o IP detectado do servidor + localhost. Se o cliente
+# depois passar a acessar por outro endereço/domínio, precisa adicionar
+# na mão em $ENV_FILE (documentado no .env.example).
+# --------------------------------------------------------------------
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [ -n "$SERVER_IP" ] && grep -q "^CSRF_TRUSTED_ORIGINS=http://localhost:8000$" "$ENV_FILE" 2>/dev/null; then
+    sed -i "s|^CSRF_TRUSTED_ORIGINS=http://localhost:8000$|CSRF_TRUSTED_ORIGINS=http://${SERVER_IP}:8000 http://localhost:8000|" "$ENV_FILE"
+fi
+
+# --------------------------------------------------------------------
 # Preenche senha/token/key do superusuário.
 #
 # Por padrão GERA VALORES ALEATÓRIOS (evita credencial previsível em
@@ -220,7 +233,6 @@ log "6/6 Subindo a stack (isso pode levar vários minutos na 1ª vez -- o NetBox
 (cd "$REPO_DIR/netbox-docker" && docker compose up -d)
 echo "    Stack no ar."
 
-SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 cat <<EOF
 
 ==========================================================================
