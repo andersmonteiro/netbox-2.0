@@ -86,7 +86,7 @@ CURRENT_USER="${SUDO_USER:-$USER}"
 # --------------------------------------------------------------------
 # 1. Dependências de sistema
 # --------------------------------------------------------------------
-log "1/6 Detectando sistema e instalando dependências básicas..."
+log "1/6 Dependências do sistema..."
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "${ID:-}" in
@@ -170,7 +170,7 @@ chmod +x setup.sh bootstrap.sh 2>/dev/null || true
 # --------------------------------------------------------------------
 # 4. setup.sh: clona netbox-docker oficial + aplica overlay + cria .env
 # --------------------------------------------------------------------
-log "4/6 Preparando a stack (netbox-docker oficial + overlay deste template)..."
+log "4/6 Preparando a stack..."
 ./setup.sh
 
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
@@ -360,7 +360,7 @@ DIODEPIN
             if [ -n "$DIODE_SECRET" ] && [ -f "$PLUGINS_PY" ]; then
                 sed -i "s|\"diode_target_override\": \"grpc://diode.local:8080/diode\",|\"diode_target_override\": \"grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode\",|" "$PLUGINS_PY"
                 sed -i "s|\"netbox_to_diode_client_secret\": \"PREENCHER_APOS_QUICKSTART_DIODE\",|\"netbox_to_diode_client_secret\": \"${DIODE_SECRET}\",|" "$PLUGINS_PY"
-                echo "    Diode no ar e plugins.py já configurado (grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode). Log: $DIODE_LOG"
+                echo "    Diode no ar. Log: $DIODE_LOG"
                 DIODE_INGEST_SECRET="$(jq -r '.[] | select(.client_id=="diode-ingest") | .client_secret' "$DIODE_DIR/oauth2/client/client-credentials.json" 2>/dev/null || echo "")"
 
                 # Deixa o Orb Agent pronto pra usar -- só falta o operador
@@ -373,7 +373,7 @@ DIODEPIN
                     sed -e "s|target: grpc://SEU_DIODE_HOST:8080/diode|target: grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode|" \
                         -e "s|client_secret: SUBSTITUA_PELO_SECRET_REAL|client_secret: ${DIODE_INGEST_SECRET}|" \
                         "$AGENT_EXAMPLE" > "$AGENT_YAML"
-                    echo "    $AGENT_YAML criado com as credenciais -- falta só editar os 'targets' (subnets reais do cliente) e rodar (seção 2.3 do README, passo 3)."
+                    echo "    orb-agent/agent.yaml criado."
                 fi
             else
                 warn "Diode subiu mas não consegui extrair o secret/plugins.py automaticamente. Siga a seção 2.3 do README (passo 2) na mão."
@@ -383,7 +383,7 @@ DIODEPIN
         fi
     fi
 else
-    log "5/7 WITH_DIODE=false -- pulando Diode (ver seção 2.3 do README para subir depois, ou WITH_DIODE=true / --with-diode)."
+    log "5/7 Diode desativado (WITH_DIODE=false)."
 fi
 
 # --------------------------------------------------------------------
@@ -396,11 +396,11 @@ fi
 NETBOX_BUILD_LOG="$REPO_DIR/netbox-docker/build.log"
 NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
-log "6/7 Build da imagem (com plugins)... (log em $NETBOX_BUILD_LOG)"
+log "6/7 Build da imagem... (log: $NETBOX_BUILD_LOG)"
 (cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache < /dev/null) > "$NETBOX_BUILD_LOG" 2>&1 \
     || { warn "Build da imagem falhou -- veja $NETBOX_BUILD_LOG"; exit 1; }
 
-log "7/7 Subindo a stack (isso pode levar vários minutos na 1ª vez -- o NetBox roda uma leva grande de migrations antes de virar 'healthy'; o docker-compose.override.yml já ajusta o healthcheck pra dar tempo suficiente, então o compose espera sozinho, sem erro de dependência no meio)... (log em $NETBOX_UP_LOG)"
+log "7/7 Subindo a stack... (log: $NETBOX_UP_LOG)"
 (cd "$REPO_DIR/netbox-docker" && docker compose up -d < /dev/null) > "$NETBOX_UP_LOG" 2>&1 \
     || { warn "Subida da stack falhou -- veja $NETBOX_UP_LOG"; exit 1; }
 echo "    Stack no ar."
