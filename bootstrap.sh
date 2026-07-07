@@ -400,10 +400,10 @@ fi
 NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
 log "6/7 Build da imagem (com plugins)..."
-(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache < /dev/null)
+(cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty build --no-cache < /dev/null)
 
 log "7/7 Subindo a stack (pode levar vários minutos na 1ª vez -- leva grande de migrations)..."
-(cd "$REPO_DIR/netbox-docker" && docker compose up -d < /dev/null)
+(cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty up -d < /dev/null)
 echo "    Stack no ar."
 
 # --------------------------------------------------------------------

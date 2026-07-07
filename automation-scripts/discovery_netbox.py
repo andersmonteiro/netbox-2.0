@@ -41,6 +41,7 @@ Variáveis de ambiente: NETBOX_URL, NETBOX_TOKEN (ou .env)
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -128,6 +129,64 @@ def _normalize_status(raw):
     if raw.startswith("2") or "down" in raw:
         return "down"
     return "unknown"
+
+
+# --------------------------------------------------------------------
+# Normalização de nome de interface -- necessário porque o Device Type
+# no NetBox costuma já vir com um Interface Template (ex: NE8000 com
+# 48 portas pré-cadastradas como "GigabitEthernet0/0/1"), mas o que
+# volta da descoberta (SSH via NAPALM, ou SNMP via ifDescr/ifName) pode
+# usar abreviação diferente (ex: "Gi0/0/1" ou "GE0/0/1"). Comparação de
+# string exata faria o apply() achar que são portas diferentes e criar
+# uma interface NOVA duplicada (tipo "other") em vez de reaproveitar a
+# porta que o template já criou. Normalizamos os dois lados (nome já
+# existente no NetBox E nome descoberto) pra um formato canônico antes
+# de comparar -- best-effort, cobre as abreviações mais comuns
+# (Cisco/Arista/Huawei-like); não cobre 100% dos vendors.
+# --------------------------------------------------------------------
+_IFACE_ABBREV = [
+    ("tengigabitethernet", "tengigabitethernet"),
+    ("tengige", "tengigabitethernet"),
+    ("tengig", "tengigabitethernet"),
+    ("te", "tengigabitethernet"),
+    ("gigabitethernet", "gigabitethernet"),
+    ("gige", "gigabitethernet"),
+    ("gig", "gigabitethernet"),
+    ("ge", "gigabitethernet"),
+    ("gi", "gigabitethernet"),
+    ("fastethernet", "fastethernet"),
+    ("fa", "fastethernet"),
+    ("ethernet", "ethernet"),
+    ("eth", "ethernet"),
+    ("et", "ethernet"),
+    ("port-channel", "portchannel"),
+    ("portchannel", "portchannel"),
+    ("po", "portchannel"),
+    ("loopback", "loopback"),
+    ("lo", "loopback"),
+    ("vlan", "vlan"),
+    ("vl", "vlan"),
+    ("management", "management"),
+    ("mgmt", "management"),
+    ("ma", "management"),
+]
+_IFACE_ABBREV_SORTED = sorted(_IFACE_ABBREV, key=lambda pair: -len(pair[0]))
+
+
+def _normalize_ifname(name):
+    """'Gi0/0/1' e 'GigabitEthernet0/0/1' -> mesma string normalizada."""
+    if not name:
+        return ""
+    s = name.strip().lower()
+    m = re.match(r"^([a-z\-]+)(.*)$", s)
+    if not m:
+        return re.sub(r"[^a-z0-9]", "", s)
+    prefix, rest = m.group(1), m.group(2)
+    rest_clean = re.sub(r"[^a-z0-9]", "", rest)
+    for abbrev, full in _IFACE_ABBREV_SORTED:
+        if prefix == abbrev:
+            return f"{full}{rest_clean}"
+    return f"{re.sub(r'[^a-z0-9]', '', prefix)}{rest_clean}"
 
 
 def collect_snmp(device, community, timeout=5, retries=1):
@@ -329,16 +388,20 @@ def cmd_apply(args):
             device.update({"serial": serial})
             changes.append(f"serial={serial}")
 
-        existing_if = {i.name: i for i in nb.dcim.interfaces.filter(device_id=device.id)}
-        created, updated = 0, 0
+        existing_if = list(nb.dcim.interfaces.filter(device_id=device.id))
+        existing_by_norm = {_normalize_ifname(i.name): i for i in existing_if}
+        created, updated, matched_norm = 0, 0, 0
         for iface in data.get("interfaces", []):
             name = iface.get("name")
             if not name:
                 continue
             enabled = iface.get("admin_status") == "up"
             description = iface.get("descr") or ""
-            if name in existing_if:
-                nb_if = existing_if[name]
+            nb_if = existing_by_norm.get(_normalize_ifname(name))
+            if nb_if:
+                if nb_if.name != name:
+                    matched_norm += 1
+                    print(f"  [interface] '{name}' descoberto == '{nb_if.name}' já existente (nome normalizado)")
                 if nb_if.enabled != enabled or (description and nb_if.description != description):
                     nb_if.update({"enabled": enabled, "description": description or nb_if.description})
                     updated += 1
@@ -358,6 +421,8 @@ def cmd_apply(args):
             changes.append(f"{created} interface(s) criada(s)")
         if updated:
             changes.append(f"{updated} interface(s) atualizada(s)")
+        if matched_norm:
+            changes.append(f"{matched_norm} casada(s) por nome normalizado")
 
         if changes:
             print(f"[aplicado] {device_name}: {', '.join(changes)}")
