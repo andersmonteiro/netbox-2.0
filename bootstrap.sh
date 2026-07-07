@@ -270,7 +270,7 @@ if [ "$WITH_DIODE" = "true" ]; then
             # quickstart.sh + docker compose up são barulhentos (pull de
             # imagem, etc.) -- manda pra um log em vez de poluir a tela;
             # a mensagem final resume o que importa.
-            ./quickstart.sh "http://${SERVER_IP:-localhost}:8000" > "$DIODE_LOG" 2>&1
+            ./quickstart.sh "http://${SERVER_IP:-localhost}:8000" < /dev/null > "$DIODE_LOG" 2>&1
 
             # Pin de versão: a branch "release" (que o quickstart.sh
             # sempre baixa, sem versão fixa) evolui sem aviso. Confirmado
@@ -306,7 +306,7 @@ services:
     image: netboxlabs/diode-auth:1.12.0
 DIODEPIN
 
-            docker compose up -d >> "$DIODE_LOG" 2>&1
+            docker compose up -d < /dev/null >> "$DIODE_LOG" 2>&1
         ) || DIODE_OK=false
 
         if [ "$DIODE_OK" = "true" ] && [ -f "$DIODE_DIR/oauth2/client/client-credentials.json" ]; then
@@ -329,10 +329,22 @@ DIODEPIN
                 # na primeira falha.
                 DIODE_AUTH_FIX_OK=false
                 for _fix_try in 1 2 3 4 5 6 7 8 9 10; do
+                    # "< /dev/null" em cada "docker compose run" é essencial
+                    # aqui: sem isso, o processo docker herda o stdin do
+                    # bash, que em "curl | bash" É o pipe que ainda está
+                    # entregando o RESTO deste script. O docker CLI então
+                    # rouba esses bytes do pipe (mesmo sem o comando dentro
+                    # do container ler nada), fazendo o bash perder o resto
+                    # do script e terminar em silêncio (sem erro, sem
+                    # warn) -- foi exatamente isso que causou o script
+                    # parar logo após o bloco do Diode, sem chegar no
+                    # build/up do NetBox. Só reproduz via "curl | bash"
+                    # (script rodado de arquivo local não tem esse
+                    # problema, daí não pegamos isso antes).
                     if (
                         cd "$DIODE_DIR"
-                        docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode
-                        docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="$DIODE_SECRET"
+                        docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode < /dev/null
+                        docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="$DIODE_SECRET" < /dev/null
                     ) >> "$DIODE_LOG" 2>&1; then
                         DIODE_AUTH_FIX_OK=true
                         break
@@ -385,11 +397,11 @@ NETBOX_BUILD_LOG="$REPO_DIR/netbox-docker/build.log"
 NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
 log "6/7 Build da imagem (com plugins)... (log em $NETBOX_BUILD_LOG)"
-(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache) > "$NETBOX_BUILD_LOG" 2>&1 \
+(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache < /dev/null) > "$NETBOX_BUILD_LOG" 2>&1 \
     || { warn "Build da imagem falhou -- veja $NETBOX_BUILD_LOG"; exit 1; }
 
 log "7/7 Subindo a stack (isso pode levar vários minutos na 1ª vez -- o NetBox roda uma leva grande de migrations antes de virar 'healthy'; o docker-compose.override.yml já ajusta o healthcheck pra dar tempo suficiente, então o compose espera sozinho, sem erro de dependência no meio)... (log em $NETBOX_UP_LOG)"
-(cd "$REPO_DIR/netbox-docker" && docker compose up -d) > "$NETBOX_UP_LOG" 2>&1 \
+(cd "$REPO_DIR/netbox-docker" && docker compose up -d < /dev/null) > "$NETBOX_UP_LOG" 2>&1 \
     || { warn "Subida da stack falhou -- veja $NETBOX_UP_LOG"; exit 1; }
 echo "    Stack no ar."
 
@@ -424,7 +436,7 @@ from django.contrib.auth import get_user_model
 u = get_user_model().objects.get(username=os.environ["NB_USER"])
 u.set_password(os.environ["NEW_PW"])
 u.save()
-') >> "$NETBOX_UP_LOG" 2>&1; then
+' < /dev/null) >> "$NETBOX_UP_LOG" 2>&1; then
                 FINAL_PASSWORD="$TYPED_PASSWORD"
                 sed -i "s|^SUPERUSER_PASSWORD=.*|SUPERUSER_PASSWORD=${FINAL_PASSWORD}|" "$ENV_FILE"
                 echo "    Senha trocada."
