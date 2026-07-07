@@ -389,20 +389,20 @@ fi
 # --------------------------------------------------------------------
 # 6. Build da imagem e subida da stack
 # --------------------------------------------------------------------
-# Build e "up" imprimem muita coisa (pull/build de camada por camada) --
-# manda pra log em vez de poluir a tela; se falhar, aponta pro log em
-# vez de sumir sem explicação (esses dois passos não são opcionais
-# como o Diode, então um erro aqui deve parar o script mesmo).
-NETBOX_BUILD_LOG="$REPO_DIR/netbox-docker/build.log"
+# Saída padrão do Docker direto na tela (build/pull/criação de
+# container) -- dá feedback visual de que algo está acontecendo,
+# já que o build (--no-cache) pode levar vários minutos. O healthcheck
+# do netbox (docker-compose.override.yml, ~20min de tolerância) evita
+# o erro de dependência "unhealthy" na 1ª subida, então "up -d" comum
+# já espera sozinho sem precisar de log auxiliar.
+# NETBOX_UP_LOG é usado só pela troca de senha (mais abaixo).
 NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
-log "6/7 Build da imagem... (log: $NETBOX_BUILD_LOG)"
-(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache < /dev/null) > "$NETBOX_BUILD_LOG" 2>&1 \
-    || { warn "Build da imagem falhou -- veja $NETBOX_BUILD_LOG"; exit 1; }
+log "6/7 Build da imagem (com plugins)..."
+(cd "$REPO_DIR/netbox-docker" && docker compose build --no-cache < /dev/null)
 
-log "7/7 Subindo a stack... (log: $NETBOX_UP_LOG)"
-(cd "$REPO_DIR/netbox-docker" && docker compose up -d < /dev/null) > "$NETBOX_UP_LOG" 2>&1 \
-    || { warn "Subida da stack falhou -- veja $NETBOX_UP_LOG"; exit 1; }
+log "7/7 Subindo a stack (pode levar vários minutos na 1ª vez -- leva grande de migrations)..."
+(cd "$REPO_DIR/netbox-docker" && docker compose up -d < /dev/null) 2>&1 | tee "$NETBOX_UP_LOG"
 echo "    Stack no ar."
 
 # --------------------------------------------------------------------
