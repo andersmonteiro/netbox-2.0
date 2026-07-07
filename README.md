@@ -271,6 +271,57 @@ mkdir -p /opt/diode && cd /opt/diode
 curl -sSfLo quickstart.sh https://raw.githubusercontent.com/netboxlabs/diode/release/diode-server/docker/scripts/quickstart.sh
 chmod +x quickstart.sh
 ./quickstart.sh http://SEU_NETBOX_IP:8000
+echo "DIODE_TAG=1.13.0" >> .env
+cat > docker-compose.override.yml <<'EOF'
+services:
+  diode-auth:
+    image: netboxlabs/diode-auth:1.12.0
+  diode-auth-bootstrap:
+    image: netboxlabs/diode-auth:1.12.0
+EOF
+docker compose up -d
+```
+
+**Por que esse pin de versão**: o `quickstart.sh` baixa a branch
+`release` do Diode, que sempre aponta pra última imagem (`latest`) sem
+aviso de versão. Confirmamos em produção que a versão atual dela
+(2.0.0, 22/mai) exige o plugin `netbox_diode_plugin` >=1.12.0, que por
+sua vez exige NetBox >=4.6.0 — mas este template fixa NetBox em 4.5.x
+(por causa do `netbox-topology-views`, que ainda não suporta 4.6 — ver
+`plugin_requirements.txt`). O resultado é uma quebra silenciosa: login
+e ingestão no Diode funcionam normalmente, mas **nada cai no IPAM do
+NetBox**, porque o `diode-reconciler` chama
+`/api/plugins/diode/bulk-plan-apply/`, endpoint que só existe a partir
+do plugin 1.12.0 — com o plugin 1.7.0 (o pinado aqui) isso dá 404
+(`docker compose logs diode-reconciler` mostra `404 Page Not Found`).
+
+A última leva de imagens anterior a essa mudança (13/jan, release
+"NetBox 4.5.x support") ainda usa `apply-change-set`/`generate-diff`,
+compatível com o plugin 1.7.0-1.11.0 / NetBox 4.5.x — só que os três
+serviços do Diode **não compartilham numeração de versão**:
+`diode-ingester` e `diode-reconciler` pararam em `1.13.0` nessa leva,
+mas `diode-auth` em `1.12.0` (confirmado nas tags do Docker Hub — não
+existe `netboxlabs/diode-auth:1.13.0`, tentar usar dá `not found` no
+`docker compose up -d`). Por isso o `DIODE_TAG=1.13.0` sozinho não
+serve pros três — ele pina certo o ingester/reconciler via variável de
+ambiente do `docker-compose.yaml` oficial, e o `docker-compose.override.yml`
+acima sobrescreve só a imagem do `diode-auth`/`diode-auth-bootstrap`
+pra `1.12.0` (o compose já mescla esse override automaticamente, sem
+precisar de `-f`). O `bootstrap.sh` já faz isso tudo automaticamente;
+se você rodou o `quickstart.sh` na mão antes desta versão do template
+(ou já tem uma instalação com `.env` sem `DIODE_TAG`), corrija e
+recrie os containers:
+
+```bash
+cd /opt/diode
+grep -q '^DIODE_TAG=' .env || echo "DIODE_TAG=1.13.0" >> .env
+cat > docker-compose.override.yml <<'EOF'
+services:
+  diode-auth:
+    image: netboxlabs/diode-auth:1.12.0
+  diode-auth-bootstrap:
+    image: netboxlabs/diode-auth:1.12.0
+EOF
 docker compose up -d
 ```
 

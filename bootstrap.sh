@@ -277,6 +277,41 @@ if [ "$WITH_DIODE" = "true" ]; then
                 chmod +x quickstart.sh
             fi
             ./quickstart.sh "http://${SERVER_IP:-localhost}:8000"
+
+            # Pin de versão: a branch "release" (que o quickstart.sh
+            # sempre baixa, sem versão fixa) evolui sem aviso. Confirmado
+            # em produção que a versão atual dela (2.0.0, 22/mai) exige o
+            # plugin netbox_diode_plugin >=1.12.0, que por sua vez exige
+            # NetBox >=4.6.0. Este template fixa NetBox em 4.5.x (por
+            # causa do netbox-topology-views, que ainda não suporta 4.6 --
+            # ver plugin_requirements.txt), então isso quebra a ingestão
+            # de forma silenciosa: o diode-reconciler chama
+            # /api/plugins/diode/bulk-plan-apply/, endpoint que só existe
+            # a partir do plugin 1.12.0. Com o plugin 1.7.0 (o que está
+            # pinado aqui), esse endpoint dá 404 -- login e ingestão no
+            # Diode funcionam normalmente, mas nada cai no IPAM do NetBox.
+            # A última leva de imagens anterior a essa mudança (13/jan,
+            # release com "NetBox 4.5.x support") ainda usa
+            # apply-change-set/generate-diff, compatível com plugin
+            # 1.7.0-1.11.0 / NetBox 4.5.x -- mas os 3 serviços do Diode
+            # NÃO compartilham numeração de versão: diode-ingester e
+            # diode-reconciler pararam em 1.13.0 nessa leva, diode-auth
+            # em 1.12.0 (confirmado nas tags do Docker Hub -- não existe
+            # netboxlabs/diode-auth:1.13.0). Por isso um único DIODE_TAG
+            # não pina os três; sobrescrevemos a imagem do diode-auth via
+            # override em vez de usar DIODE_TAG global. Ver README seção
+            # 2.3.
+            if ! grep -q '^DIODE_TAG=' .env 2>/dev/null; then
+                echo "DIODE_TAG=1.13.0" >> .env
+            fi
+            cat > docker-compose.override.yml <<'DIODEPIN'
+services:
+  diode-auth:
+    image: netboxlabs/diode-auth:1.12.0
+  diode-auth-bootstrap:
+    image: netboxlabs/diode-auth:1.12.0
+DIODEPIN
+
             docker compose up -d
         ) || DIODE_OK=false
 
