@@ -38,6 +38,24 @@ services:
       - "8000:8080"
     env_file:
       - .env
+    # O healthcheck padrão do netbox-docker (start_period 90s, interval
+    # 15s, retries 3 = ~135s de tolerância) é curto demais pra 1ª subida,
+    # que roda uma leva grande de migrations e pode levar ~10 minutos.
+    # Docker marca o container como "unhealthy" assim que estoura esse
+    # prazo -- e é isso que faz o "docker compose up" reportar
+    # "Error dependency netbox failed to start" pros serviços que
+    # dependem dele (netbox-worker, netbox-housekeeping), mesmo o
+    # netbox continuando a subir normalmente por trás. Aumentando
+    # "retries" pra 80 (80 x 15s = 1200s = 20min de tolerância depois do
+    # start_period), o compose espera o tempo certo sem nunca marcar
+    # como falha -- e um "docker compose up -d" comum já funciona sem
+    # precisar de nenhum script auxiliar de espera.
+    healthcheck:
+      test: curl -f http://localhost:8080/login/ || exit 1
+      start_period: 90s
+      timeout: 3s
+      interval: 15s
+      retries: 80
 
   netbox-worker:
     image: netbox:latest-plugins
