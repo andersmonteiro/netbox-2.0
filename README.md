@@ -53,10 +53,12 @@ usa a última versão estável. Cada cliente tem seu próprio `.env`
 
 ### Servidor novo, sem nada instalado (recomendado para clientes)
 
-Um único comando: instala Docker + dependências (git, nmap, python3...),
-clona este template, sobe o `netbox-docker` oficial com o overlay
-aplicado, gera senha/token do superusuário automaticamente e já deixa a
-stack no ar.
+Um único comando: instala Docker + dependências (git, nmap, python3,
+jq...), clona este template, sobe o `netbox-docker` oficial com o
+overlay aplicado, gera senha/token do superusuário automaticamente,
+**sobe também o Diode + já deixa o Orb Agent pronto** (seção 2.3 —
+ligado por padrão em todo cliente novo, use ou não; desative com
+`WITH_DIODE=false`) e deixa a stack no ar.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
@@ -248,6 +250,14 @@ Já deixei o plugin `netbox_diode_plugin` no `plugin_requirements.txt`
 (pinado na versão 1.7.0, compatível com NetBox 4.5.x) pra você não
 precisar rebuildar a imagem depois.
 
+**Se você instalou via `bootstrap.sh` (padrão), os passos 1 e 2 abaixo
+já rodaram sozinhos** — Diode sobe automaticamente (`WITH_DIODE=true`
+é o default) e `orb-agent/agent.yaml` já sai criado com as credenciais
+certas. Só falta o **passo 3**: editar os `targets` com as subnets
+reais do cliente e rodar o container. Os passos 1-2 abaixo servem pra
+quem instalou com `setup.sh` (sem bootstrap) ou desativou com
+`WITH_DIODE=false`/`--no-diode` e quer ligar depois.
+
 Pré-requisito: `jq` instalado (o `bootstrap.sh` já instala; se você usou
 o `setup.sh` num servidor que já tinha Docker, confira com `jq --version`
 e instale com `apt install jq` se faltar).
@@ -296,17 +306,35 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
+**Bug conhecido — 401 nos logs do NetBox ao consultar o Diode**: o
+client `netbox-to-diode` criado pelo `quickstart.sh` só aceita
+autenticação `client_secret_post`, mas o `netbox_diode_plugin` manda
+`client_secret_basic` — o Hydra rejeita com 401 (`docker compose logs
+netbox | grep -i diode` mostra `Diode Auth token introspection
+failed`). O `bootstrap.sh` já corrige isso automaticamente; se você
+seguiu esse passo 2 na mão, corrija recriando o client com o mesmo
+secret via `authmanager` (que registra com o método certo):
+
+```bash
+cd /opt/diode
+docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode
+docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="O_MESMO_SECRET_DE_ANTES"
+```
+
 Passo 3 — configurar e rodar o Orb Agent. Copie
 `orb-agent/agent.yaml.example` deste template para `orb-agent/agent.yaml`,
-ajuste os `targets` (subnets reais do cliente) e o `target:` do Diode
-para `grpc://SEU_SERVIDOR_IP:8080/diode` (mesmo endereço do passo 2),
-depois:
+ajuste os `targets` (subnets reais do cliente), o `target:` do Diode
+para `grpc://SEU_SERVIDOR_IP:8080/diode` (mesmo endereço do passo 2), e
+o `client_id`/`client_secret` do client `diode-ingest` (pego com `jq`,
+ver comentário no `.example`). **Cole o valor literal no YAML — o Orb
+Agent não expande `${VAR}`** (testamos: ele manda a string
+`"${DIODE_CLIENT_ID}"` literal pro Diode e a autenticação falha).
+`agent.yaml` já está no `.gitignore` por conter esse secret. Depois:
 
 ```bash
 cd orb-agent
-docker run --net=host -v "$(pwd)":/opt/orb/ \
-  -e DIODE_CLIENT_ID=diode-ingest \
-  -e DIODE_CLIENT_SECRET=<client_secret_do_client_diode-ingest,_impresso_no_final_do_passo_1> \
+docker run -d --name orb-agent --net=host --restart unless-stopped \
+  -v "$(pwd)":/opt/orb/ \
   netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
 ```
 
