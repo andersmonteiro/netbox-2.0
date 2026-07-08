@@ -456,6 +456,19 @@ def _apply_discovery_form(nb, device, form):
     if primary_ip:
         core.set_primary_ip(nb, device, primary_ip)
 
+    # discovery_ssh_port é custom field tipo "integer" no NetBox -- manda
+    # como string (formulário HTML sempre manda string) que ele recusa com
+    # 400 "Value must be an integer". Converte pra int de verdade aqui, e
+    # ignora silenciosamente se vier algo não numérico (não trava o salvamento
+    # dos outros campos por causa disso).
+    raw_ssh_port = (form.get("discovery_ssh_port") or "").strip()
+    ssh_port = None
+    if raw_ssh_port:
+        try:
+            ssh_port = int(raw_ssh_port)
+        except ValueError:
+            ssh_port = None
+
     method = form.get("method")
     if method:
         core.set_discovery_fields(
@@ -463,7 +476,7 @@ def _apply_discovery_form(nb, device, form):
             discovery_username=form.get("discovery_username") or None,
             discovery_password=form.get("discovery_password") or None,
             discovery_snmp_community=form.get("discovery_snmp_community") or None,
-            discovery_ssh_port=form.get("discovery_ssh_port") or None,
+            discovery_ssh_port=ssh_port,
         )
 
 
