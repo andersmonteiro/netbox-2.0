@@ -74,8 +74,8 @@
             <th>IP de gerência <i class="ti ti-info-circle text-secondary" title="IP usado pra conectar e coletar dados do device"></i></th>
             <th>Platform <i class="ti ti-info-circle text-secondary" title="Driver NAPALM, necessário pra descoberta via SSH"></i></th>
             <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH (NAPALM) ou SNMP"></i></th>
-            <th>Usuário (SSH) <i class="ti ti-info-circle text-secondary" title="Usuário de login SSH"></i></th>
-            <th>Senha (SSH) <i class="ti ti-info-circle text-secondary" title="Senha de login SSH -- nunca é exibida, só substituída"></i></th>
+            <th>Usuário (SSH) <i class="ti ti-info-circle text-secondary" title="Usuário de login SSH. Em MikroTik configurado como SNMP, é opcional -- só usado pra confirmar o vínculo VLAN/porta física"></i></th>
+            <th>Senha (SSH) <i class="ti ti-info-circle text-secondary" title="Senha de login SSH -- nunca é exibida, só substituída. Em MikroTik configurado como SNMP, é opcional"></i></th>
             <th>Porta SSH <i class="ti ti-info-circle text-secondary" title="Padrão 22 se deixar em branco"></i></th>
             <th>Community (SNMP) <i class="ti ti-info-circle text-secondary" title="Community string usada no SNMP (ex: public)"></i></th>
             <th>Status <i class="ti ti-info-circle text-secondary" title="Se o device tem tudo configurado pra rodar a descoberta"></i></th>
@@ -147,8 +147,9 @@
                 <option value="snmp" {% if r.method == 'snmp' %}selected{% endif %}>SNMP</option>
               </select>
             </td>
+            {% set allow_ssh_cred = r.method == 'ssh' or (r.method == 'snmp' and 'mikrotik' in (r.manufacturer or '')|lower) %}
             <td>
-              {% if r.method == 'ssh' %}
+              {% if allow_ssh_cred %}
               <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_username or "—" }}</span>
               <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_username }}" style="display:none" autocomplete="off">
               {% else %}
@@ -157,8 +158,8 @@
               {% endif %}
             </td>
             <td>
-              {% if r.method == 'ssh' %}
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ "definida" if r.has_cred else "—" }}</span>
+              {% if allow_ssh_cred %}
+              <span class="view-val click-edit text-secondary" tabindex="0">{{ "definida" if r.has_ssh_cred else "—" }}</span>
               <input type="password" class="edit-val form-control form-control-sm" style="display:none" placeholder="deixe em branco pra manter" autocomplete="new-password">
               {% else %}
               <span class="text-secondary">—</span>
@@ -166,7 +167,7 @@
               {% endif %}
             </td>
             <td>
-              {% if r.method == 'ssh' %}
+              {% if allow_ssh_cred %}
               <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_ssh_port or "22" }}</span>
               <input type="number" class="edit-val form-control form-control-sm" value="{{ r.cf_ssh_port }}" style="display:none" placeholder="22">
               {% else %}

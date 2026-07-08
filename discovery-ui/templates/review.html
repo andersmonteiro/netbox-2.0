@@ -65,7 +65,7 @@
                   <option value="">— nenhuma —</option>
                   {% for other_name in item.all_names %}
                     {% if other_name != iface.name %}
-                    <option value="{{ other_name }}">{{ other_name }}</option>
+                    <option value="{{ other_name }}" {% if other_name == iface.guessed_parent %}selected{% endif %}>{{ other_name }}</option>
                     {% endif %}
                   {% endfor %}
                 </select>

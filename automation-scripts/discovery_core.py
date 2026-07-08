@@ -99,7 +99,7 @@ def _normalize_status(raw):
     return "unknown"
 
 
-def collect_snmp(device, community, timeout=5, retries=1):
+def collect_snmp(device, community, timeout=5, retries=1, ssh_username=None, ssh_password=None, ssh_port=None):
     host = str(device.primary_ip4).split("/")[0] if device.primary_ip4 else None
     if not host:
         return {"method": "snmp", "errors": ["sem IP de gerência (primary_ip4)"]}
@@ -128,7 +128,81 @@ def collect_snmp(device, community, timeout=5, retries=1):
         data["interfaces"] = interfaces
     except Exception as exc:
         data["errors"].append(str(exc))
+        return data
+
+    # Extra opcional, só pra MikroTik: SNMP de leitura simples não expõe o
+    # vínculo VLAN -> porta física no RouterOS (confirmado -- nem o
+    # LibreNMS consegue isso sem instalar um script no device com SNMP
+    # write habilitado, o que é um risco de segurança que este projeto
+    # evita de propósito). Se o operador também informou uma credencial
+    # SSH pra esse device (mesmos campos usados no método "ssh", só que
+    # aqui como um extra opcional), tentamos ler
+    # "/interface vlan print detail" via CLI pra confirmar o vínculo real.
+    # Best-effort: qualquer falha aqui (sem netmiko, sem credencial, não é
+    # MikroTik, timeout...) não derruba a coleta SNMP principal, que já
+    # está pronta -- só fica sem essa dica extra, e o operador escolhe
+    # manualmente na revisão.
+    sys_descr = (data.get("sys_descr") or "").lower()
+    looks_like_mikrotik = "routeros" in sys_descr or "mikrotik" in sys_descr
+    if looks_like_mikrotik and ssh_username and ssh_password:
+        try:
+            vlan_parents = collect_mikrotik_vlan_parents(host, ssh_username, ssh_password, port=ssh_port)
+            for iface in data["interfaces"]:
+                parent = vlan_parents.get(iface["name"])
+                if parent:
+                    iface["vlan_parent_from_device"] = parent
+        except Exception:
+            pass  # best-effort -- ver comentário acima
+
     return data
+
+
+def collect_mikrotik_vlan_parents(host, username, password, port=None):
+    """Conecta via SSH (Netmiko) num MikroTik/RouterOS e lê
+    '/interface vlan print detail' pra descobrir a interface física real
+    de cada VLAN. Retorna {nome_da_vlan: nome_da_interface_pai}.
+
+    Levanta exceção se netmiko não estiver instalado, a conexão falhar, ou
+    nada for encontrado -- quem chama (collect_snmp) trata isso como
+    best-effort e ignora silenciosamente, então essa função não precisa
+    ser silenciosa por conta própria.
+
+    Nota: o parsing do "print detail" foi escrito a partir do formato
+    documentado do RouterOS (campos "name=" e "interface=" por item), mas
+    não foi testado contra um device real neste ambiente -- vale conferir
+    a saída de "/interface vlan print detail without-paging" no primeiro
+    device MikroTik real e ajustar o regex abaixo se o formato divergir.
+    """
+    from netmiko import ConnectHandler  # import tardio: só quem usar essa checagem extra precisa do netmiko
+
+    conn = ConnectHandler(
+        device_type="mikrotik_routeros",
+        host=host,
+        username=username,
+        password=password,
+        port=int(port) if port else 22,
+        timeout=10,
+    )
+    try:
+        output = conn.send_command("/interface vlan print detail without-paging")
+    finally:
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+
+    parents = {}
+    # Cada item do "print detail" tem name="vlanX" e interface=porta-fisica
+    # na mesma "linha lógica" (pode quebrar em várias linhas de terminal,
+    # por isso comparamos sobre o texto inteiro, item por item, usando o
+    # índice numérico no início de cada entrada como separador).
+    entries = re.split(r"\n(?=\s*\d+\s)", output)
+    for entry in entries:
+        name_match = re.search(r'name="([^"]+)"', entry)
+        iface_match = re.search(r"interface=(\S+)", entry)
+        if name_match and iface_match:
+            parents[name_match.group(1)] = iface_match.group(1)
+    return parents
 
 
 # --------------------------------------------------------------------
@@ -204,7 +278,15 @@ def collect_device(device, method, credentials, snmp_timeout=5, snmp_retries=1):
         community = credentials.get("discovery_snmp_community")
         if not community:
             return {"method": "snmp", "errors": ["falta a community"]}
-        return collect_snmp(device, community, timeout=snmp_timeout, retries=snmp_retries)
+        return collect_snmp(
+            device, community, timeout=snmp_timeout, retries=snmp_retries,
+            # Credencial SSH extra e opcional (mesmos campos do método
+            # "ssh") -- só usada pra confirmar o vínculo VLAN -> porta
+            # física em devices MikroTik, ver collect_snmp().
+            ssh_username=credentials.get("discovery_username") or None,
+            ssh_password=credentials.get("discovery_password") or None,
+            ssh_port=credentials.get("discovery_ssh_port") or None,
+        )
     else:
         return {"method": method, "errors": [f"método desconhecido: '{method}' (use 'ssh' ou 'snmp')"]}
 
@@ -326,10 +408,40 @@ def guess_interface_type(name):
 
 
 def is_vlan_ifname(name):
-    """True se o nome parece uma interface de VLAN (sub-interface lógica
-    que faz sentido vincular a uma porta física na revisão)."""
+    """True se o nome parece uma sub-interface lógica que faz sentido
+    vincular a uma porta física na revisão -- cobre tanto o padrão MikroTik
+    (vlanN, sem relação de nome com a porta física) quanto o padrão
+    dotted-notation usado por Cisco/Juniper/Huawei (ex: 'Gi0/1.100',
+    'ge-0/0/1.100', onde o sufixo depois do ponto é o ID da VLAN)."""
     n = (name or "").strip().lower()
-    return n.startswith("vlan") or n.startswith("vl")
+    if n.startswith("vlan") or n.startswith("vl"):
+        return True
+    if "." in n and n.rsplit(".", 1)[-1].isdigit():
+        return True
+    return False
+
+
+def guess_parent_name(name, all_names):
+    """Tenta adivinhar a interface física/pai de uma sub-interface a partir
+    do próprio NOME -- só funciona pro padrão dotted-notation (Cisco/
+    Juniper/Huawei), onde tudo antes do último ponto é o nome da interface
+    pai (ex: 'GigabitEthernet0/1.100' -> pai 'GigabitEthernet0/1'). Só
+    retorna um palpite se essa interface pai realmente aparecer na mesma
+    coleta (all_names); senão retorna None e o operador escolhe manualmente
+    no dropdown. Não cobre o padrão MikroTik ('vlan3' não tem o nome da
+    porta física embutido) -- aí não tem chute por nome possível."""
+    if not name or "." not in name:
+        return None
+    candidate = name.rsplit(".", 1)[0].strip()
+    if not candidate or candidate == name:
+        return None
+    if candidate in all_names:
+        return candidate
+    cand_norm = normalize_ifname(candidate)
+    for other in all_names:
+        if other != name and normalize_ifname(other) == cand_norm:
+            return other
+    return None
 
 
 def apply_device_result(nb, device, data, interface_filter=None):
@@ -477,17 +589,24 @@ def set_primary_ip(nb, device, ip_str):
 
 def set_discovery_fields(device, method, discovery_username=None, discovery_password=None, discovery_snmp_community=None, discovery_ssh_port=None):
     """Grava discovery_method + a credencial correspondente nos custom
-    fields do device (mesmos campos criados por create_discovery_fields.py)."""
+    fields do device (mesmos campos criados por create_discovery_fields.py).
+
+    username/password/ssh_port são gravados tanto pra method="ssh" (uso
+    normal) quanto pra method="snmp" (uso opcional: credencial SSH extra
+    só pra confirmar o vínculo VLAN -> porta física em devices MikroTik,
+    ver collect_snmp()/collect_mikrotik_vlan_parents() -- se o operador
+    não preencher nada aqui num device SNMP, esses campos continuam
+    vazios e a coleta segue 100% via SNMP, sem essa checagem extra)."""
     cf = dict(device.custom_fields or {})
     cf["discovery_method"] = method
-    if method == "ssh":
+    if method in ("ssh", "snmp"):
         if discovery_username is not None:
             cf["discovery_username"] = discovery_username
         if discovery_password is not None:
             cf["discovery_password"] = discovery_password
         if discovery_ssh_port is not None:
             cf["discovery_ssh_port"] = discovery_ssh_port
-    elif method == "snmp":
+    if method == "snmp":
         if discovery_snmp_community is not None:
             cf["discovery_snmp_community"] = discovery_snmp_community
     device.update({"custom_fields": cf})

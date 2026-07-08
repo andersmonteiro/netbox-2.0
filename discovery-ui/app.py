@@ -273,6 +273,12 @@ def dashboard():
         cf = d.custom_fields or {}
         method = cf.get("discovery_method")
         has_cred = bool(cf.get("discovery_username") and cf.get("discovery_password")) if method == "ssh" else bool(cf.get("discovery_snmp_community")) if method == "snmp" else False
+        # Independente do método -- usado só pra mostrar "definida"/"—" na
+        # célula de Senha (SSH), que agora também serve pro extra opcional
+        # de MikroTik em devices configurados como SNMP (ver allow_ssh_cred
+        # no dashboard.html). Não entra no cálculo de "ready": a checagem
+        # extra é opcional, não bloqueia a descoberta principal.
+        has_ssh_cred = bool(cf.get("discovery_username") and cf.get("discovery_password"))
         site = _display_case(str(d.site)) if d.site else ""
         region = ""
         try:
@@ -303,6 +309,7 @@ def dashboard():
             "platform_id": d.platform.id if d.platform else None,
             "method": method,
             "has_cred": has_cred,
+            "has_ssh_cred": has_ssh_cred,
             "ready": bool(method and has_cred and d.primary_ip4 and (method != "ssh" or d.platform)),
             "cf_username": cf.get("discovery_username") or "",
             "cf_ssh_port": cf.get("discovery_ssh_port") or "",
@@ -530,6 +537,15 @@ def review():
                 # precisar rodar de novo.
                 iface["guessed_type"] = core.guess_interface_type(iface.get("name"))
                 iface["is_vlan"] = core.is_vlan_ifname(iface.get("name"))
+                # Prioridade do palpite de interface pai: 1) confirmado de
+                # verdade lendo o device (SSH extra no MikroTik, ver
+                # discovery_core.collect_mikrotik_vlan_parents) -- 2) chute
+                # por nome (sub-interface dotted-notation tipo Gi0/1.100,
+                # ver guess_parent_name) -- 3) nenhum, o operador escolhe.
+                iface["guessed_parent"] = (
+                    iface.get("vlan_parent_from_device")
+                    or (core.guess_parent_name(iface.get("name"), all_names) if iface["is_vlan"] else None)
+                )
             n_up = sum(1 for i in interfaces if i.get("oper_status") == "up")
             items.append({
                 "filename": f.name, "data": data, "n_interfaces": len(interfaces), "n_up": n_up,
