@@ -1,64 +1,77 @@
 {% extends "base.html" %}
 {% block title %}Devices · NetBox Oracle{% endblock %}
 {% block content %}
-<h1>Devices</h1>
-
-<div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
-    <span class="muted">{{ rows|length }} device(s) no NetBox.</span>
-    <div>
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Devices</h2>
+      <div class="text-secondary">{{ rows|length }} device(s) no NetBox</div>
+    </div>
+    <div class="col-auto ms-auto d-print-none">
       {% if pending_count %}
-        <a href="{{ url_for('review') }}" class="btn secondary">{{ pending_count }} descoberta(s) aguardando revisão</a>
+        <a href="{{ url_for('review') }}" class="btn btn-outline-warning me-2">
+          <i class="ti ti-alert-triangle me-1"></i>{{ pending_count }} aguardando revisão
+        </a>
       {% endif %}
-      <a href="{{ url_for('device_new') }}" class="btn">+ Cadastrar device</a>
+      <a href="{{ url_for('device_new') }}" class="btn btn-primary">
+        <i class="ti ti-plus me-1"></i>Cadastrar device
+      </a>
     </div>
   </div>
+</div>
 
+<div class="card">
   {% if rows %}
   <form method="post" action="{{ url_for('discover') }}">
-    <table>
-      <thead>
-        <tr>
-          <th><input type="checkbox" onclick="document.querySelectorAll('.dev-cb').forEach(c => c.checked = this.checked)"></th>
-          <th>Nome</th>
-          <th>Site</th>
-          <th>IP de gerência</th>
-          <th>Platform</th>
-          <th>Método</th>
-          <th>Status</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td><input type="checkbox" class="dev-cb" name="device_ids" value="{{ r.id }}" {% if not r.ready %}disabled{% endif %}></td>
-          <td>{{ r.name }}</td>
-          <td>{{ r.site or "—" }}</td>
-          <td>{{ r.primary_ip or "—" }}</td>
-          <td>{{ r.platform or "—" }}</td>
-          <td>
-            {% if r.method %}<span class="badge method">{{ r.method|upper }}</span>{% else %}<span class="badge neutral">não configurado</span>{% endif %}
-          </td>
-          <td>
-            {% if r.ready %}
-              <span class="badge ready">pronto</span>
-            {% else %}
-              <span class="badge missing">incompleto</span>
-            {% endif %}
-          </td>
-          <td><a class="link" href="{{ url_for('device_edit', device_id=r.id) }}">editar</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <div style="margin-top: 16px;">
-      <button type="submit">Rodar descoberta nos selecionados</button>
-      <span class="muted">Pode levar alguns segundos por device -- nada é gravado no NetBox ainda, só depois da revisão.</span>
+    <div class="table-responsive">
+      <table class="table table-vcenter card-table">
+        <thead>
+          <tr>
+            <th class="w-1"><input type="checkbox" class="form-check-input m-0" onclick="document.querySelectorAll('.dev-cb').forEach(c => c.checked = this.checked)"></th>
+            <th>Nome</th>
+            <th>Site</th>
+            <th>IP de gerência</th>
+            <th>Platform</th>
+            <th>Método</th>
+            <th>Status</th>
+            <th class="w-1"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td><input type="checkbox" class="form-check-input m-0 dev-cb" name="device_ids" value="{{ r.id }}" {% if not r.ready %}disabled{% endif %}></td>
+            <td class="fw-medium">{{ r.name }}</td>
+            <td class="text-secondary">{{ r.site or "—" }}</td>
+            <td class="text-secondary">{{ r.primary_ip or "—" }}</td>
+            <td class="text-secondary">{{ r.platform or "—" }}</td>
+            <td>
+              {% if r.method %}<span class="badge bg-teal-lt badge-method">{{ r.method|upper }}</span>{% else %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
+            </td>
+            <td>
+              {% if r.ready %}
+                <span class="badge bg-success-lt"><i class="ti ti-circle-check me-1"></i>pronto</span>
+              {% else %}
+                <span class="badge bg-red-lt"><i class="ti ti-circle-x me-1"></i>incompleto</span>
+              {% endif %}
+            </td>
+            <td><a class="text-secondary" href="{{ url_for('device_edit', device_id=r.id) }}" title="editar"><i class="ti ti-edit"></i></a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer d-flex align-items-center">
+      <button type="submit" class="btn btn-primary">
+        <i class="ti ti-radar me-1"></i>Rodar descoberta nos selecionados
+      </button>
+      <span class="text-secondary ms-3">Pode levar alguns segundos por device -- nada é gravado no NetBox ainda, só depois da revisão.</span>
     </div>
   </form>
   {% else %}
-  <p class="muted">Nenhum device encontrado (ou erro ao consultar o NetBox -- veja a mensagem acima).</p>
+  <div class="card-body">
+    <p class="text-secondary mb-0">Nenhum device encontrado (ou erro ao consultar o NetBox -- veja a mensagem acima).</p>
+  </div>
   {% endif %}
 </div>
 {% endblock %}
