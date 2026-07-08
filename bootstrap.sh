@@ -14,13 +14,17 @@
 #   3. Clona este template (se ainda não estiver rodando de dentro dele)
 #   4. Roda o setup.sh (clona o netbox-docker oficial + aplica o overlay)
 #   5. Gera (ou pergunta) a senha/token do superusuário
-#   6. Diode (stack separada, opcional) -- DESLIGADO por padrão. O
+#   6. Restaura o catálogo de device types (netbox-seed/) -- SÓ na 1ª
+#      instalação, quando o banco ainda está vazio (ver seção 2.5 do
+#      README). Numa reinstalação sobre um banco que já tem dado, isso
+#      é pulado automaticamente pra não sobrescrever nada.
+#   7. Diode (stack separada, opcional) -- DESLIGADO por padrão. O
 #      caminho recomendado pra descoberta/enriquecimento é
 #      automation-scripts/discovery_netbox.py (SSH/SNMP direto via API
 #      do NetBox, sem depender de nenhum serviço externo -- ver seção
 #      2.4 do README). Ligue com WITH_DIODE=true / --with-diode se
 #      quiser mesmo assim (ex: pra descoberta rasa via Orb Agent).
-#   7. Builda a imagem e sobe a stack (inclui a discovery-ui, interface
+#   8. Builda a imagem e sobe a stack (inclui a discovery-ui, interface
 #      web de descoberta em http://SEU_SERVIDOR:5050 -- login simples,
 #      pensada pro time comercial revisar/aprovar descobertas sem usar
 #      terminal) — a 1ª subida roda uma leva grande de migrations e
@@ -94,7 +98,7 @@ CURRENT_USER="${SUDO_USER:-$USER}"
 # --------------------------------------------------------------------
 # 1. Dependências de sistema
 # --------------------------------------------------------------------
-log "1/7 Dependências do sistema..."
+log "1/8 Dependências do sistema..."
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "${ID:-}" in
@@ -119,7 +123,7 @@ fi
 # --------------------------------------------------------------------
 # 2. Docker Engine + Compose plugin
 # --------------------------------------------------------------------
-log "2/7 Verificando Docker..."
+log "2/8 Verificando Docker..."
 if ! command -v docker >/dev/null 2>&1; then
     echo "    Docker não encontrado, instalando via script oficial (get.docker.com)..."
     curl -fsSL https://get.docker.com | $SUDO sh
@@ -142,7 +146,7 @@ fi
 # --------------------------------------------------------------------
 # 3. Garantir que temos o template localmente
 # --------------------------------------------------------------------
-log "3/7 Localizando/obtendo o template..."
+log "3/8 Localizando/obtendo o template..."
 # Quando rodado via "curl | bash" não existe arquivo de script real,
 # então BASH_SOURCE[0] vem vazio -- com "set -u" isso quebraria sem o
 # ":-" abaixo. Nesse caso SCRIPT_DIR cai pro diretório atual (ex:
@@ -178,7 +182,7 @@ chmod +x setup.sh bootstrap.sh 2>/dev/null || true
 # --------------------------------------------------------------------
 # 4. setup.sh: clona netbox-docker oficial + aplica overlay + cria .env
 # --------------------------------------------------------------------
-log "4/7 Preparando a stack..."
+log "4/8 Preparando a stack..."
 ./setup.sh
 
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
@@ -239,7 +243,6 @@ if grep -q "troque-este-token-de-40-caracteres" "$ENV_FILE" 2>/dev/null; then
     fi
     sed -i "s|SUPERUSER_API_TOKEN=troque-este-token-de-40-caracteres|SUPERUSER_API_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
     sed -i "s|NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
-    sed -i "s|MCP_NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|MCP_NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
     sed -i "s|DISCOVERY_UI_NETBOX_TOKEN=\${SUPERUSER_API_TOKEN}|DISCOVERY_UI_NETBOX_TOKEN=${FINAL_TOKEN}|" "$ENV_FILE"
 fi
 # A partir do NetBox 4.3 (token de API "v2"), SUPERUSER_API_TOKEN sozinho
@@ -275,10 +278,62 @@ if grep -q "DISCOVERY_UI_SECRET_KEY=troque-esta-chave-aleatoria" "$ENV_FILE" 2>/
 fi
 
 # --------------------------------------------------------------------
-# 5. Diode (ligado por padrão -- desative com WITH_DIODE=false ou --no-diode)
+# 6. Catálogo de device types (netbox-seed/device-catalog.sql) -- SÓ
+# roda na 1ª instalação, quando o banco Postgres ainda está vazio.
+# O dump é um pg_dump COMPLETO (schema + dados), gerado a partir de uma
+# instalação já catalogada com manufacturers/device types/templates de
+# interface (sem nenhum device/IP real de cliente -- essas tabelas são
+# tiradas do dump antes de chegar aqui, junto com usuário/sessão/audit
+# log). Por isso subimos SÓ o Postgres primeiro: se a tabela
+# django_migrations ainda não existir, é a 1ª subida e é seguro
+# restaurar; se já existir, é uma reinstalação/atualização sobre um
+# banco que já tem dado real, e não tocamos em nada.
+# --------------------------------------------------------------------
+log "5/8 Catálogo de device types..."
+SEED_SQL="$REPO_DIR/netbox-seed/device-catalog.sql"
+if [ ! -f "$SEED_SQL" ]; then
+    echo "    netbox-seed/device-catalog.sql não encontrado, pulando."
+else
+    PG_ENV_FILE="$REPO_DIR/netbox-docker/env/postgres.env"
+    PG_USER="$(grep '^POSTGRES_USER=' "$PG_ENV_FILE" 2>/dev/null | cut -d= -f2)"
+    PG_DB="$(grep '^POSTGRES_DB=' "$PG_ENV_FILE" 2>/dev/null | cut -d= -f2)"
+    PG_USER="${PG_USER:-netbox}"
+    PG_DB="${PG_DB:-netbox}"
+
+    (cd "$REPO_DIR/netbox-docker" && docker compose up -d postgres redis redis-cache < /dev/null) >/dev/null
+
+    PG_READY=false
+    for _pg_try in $(seq 1 30); do
+        if (cd "$REPO_DIR/netbox-docker" && docker compose exec -T postgres pg_isready -q -U "$PG_USER" -d "$PG_DB" < /dev/null); then
+            PG_READY=true
+            break
+        fi
+        sleep 2
+    done
+
+    if [ "$PG_READY" != "true" ]; then
+        warn "Postgres não respondeu a tempo -- pulando restauração do catálogo de device types. Rode manualmente depois (seção 2.5 do README) se quiser."
+    else
+        DB_HAS_SCHEMA="$(cd "$REPO_DIR/netbox-docker" && docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -tAc "SELECT to_regclass('public.django_migrations');" < /dev/null | tr -d '[:space:]')"
+        if [ -z "$DB_HAS_SCHEMA" ]; then
+            echo "    Banco vazio (1ª instalação) -- restaurando netbox-seed/device-catalog.sql..."
+            SEED_LOG="$REPO_DIR/netbox-docker/seed-restore.log"
+            if (cd "$REPO_DIR/netbox-docker" && docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" < "$SEED_SQL") > "$SEED_LOG" 2>&1; then
+                echo "    Catálogo restaurado: manufacturers, device types e templates de interface pré-cadastrados."
+            else
+                warn "Falha ao restaurar o catálogo de device types -- detalhes em $SEED_LOG. A instalação continua normalmente, só sem o catálogo pré-cadastrado."
+            fi
+        else
+            echo "    Banco já tem schema (não é a 1ª instalação) -- não mexi em nada, catálogo não é reaplicado."
+        fi
+    fi
+fi
+
+# --------------------------------------------------------------------
+# 7. Diode (ligado por padrão -- desative com WITH_DIODE=false ou --no-diode)
 # --------------------------------------------------------------------
 if [ "$WITH_DIODE" = "true" ]; then
-    log "5/7 Subindo o Diode..."
+    log "6/8 Subindo o Diode..."
     # Roda antes do build do NetBox de propósito: assim o plugins.py já
     # sai do build com as credenciais certas, sem precisar rebuildar
     # duas vezes. Se algo falhar aqui, avisamos e seguimos com o resto
@@ -412,11 +467,11 @@ DIODEPIN
         fi
     fi
 else
-    log "5/7 Diode desativado (WITH_DIODE=false)."
+    log "6/8 Diode desativado (WITH_DIODE=false)."
 fi
 
 # --------------------------------------------------------------------
-# 6. Build da imagem e subida da stack
+# 8. Build da imagem e subida da stack
 # --------------------------------------------------------------------
 # Saída 100% nativa do Docker direto na tela (sem pipe/tee/redirect --
 # qualquer um desses faz o Docker achar que não está num terminal de
@@ -428,10 +483,10 @@ fi
 # relação com a saída do "up -d" em si.
 NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
-log "6/7 Build da imagem (com plugins)..."
+log "7/8 Build da imagem (com plugins)..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty build --no-cache < /dev/null)
 
-log "7/7 Subindo a stack (pode levar vários minutos na 1ª vez -- leva grande de migrations)..."
+log "8/8 Subindo a stack (pode levar vários minutos na 1ª vez -- leva grande de migrations)..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty up -d < /dev/null)
 echo "    Stack no ar."
 
@@ -479,7 +534,9 @@ fi
 
 DIODE_PENDENCIA_LINE=""
 if [ "$WITH_DIODE" != "true" ]; then
-    DIODE_PENDENCIA_LINE="  - Diode/Orb Agent            -> opcional, seção 2.3 do README"
+    DIODE_PENDENCIA_LINE="
+Diode/Orb Agent (descoberta de rede opcional, seção 2.3 do README) não
+foi ligado -- use WITH_DIODE=true / --with-diode se quiser mesmo assim."
 fi
 
 DIODE_SUMMARY=""
@@ -518,13 +575,6 @@ Usuário:       $(grep '^DISCOVERY_UI_USER=' "$ENV_FILE" | cut -d= -f2)
 Senha:         $(grep '^DISCOVERY_UI_PASSWORD=' "$ENV_FILE" | cut -d= -f2)
 
 *** Anote as senhas e o token acima agora — eles não aparecem de novo. ***
-
-Pendências que exigem dado real do cliente (edite $ENV_FILE e reinicie
-os containers depois com: cd $REPO_DIR/netbox-docker && docker compose up -d):
-  - ZABBIX_HOST / ZABBIX_TOKEN  -> integração com Zabbix (seção 3 do README)
 ${DIODE_PENDENCIA_LINE}
-O NetBox MCP Server (agente de IA) e o netbox-zabbix-sync já estão de pé,
-mas o segundo só vai sincronizar de verdade depois que ZABBIX_HOST e
-ZABBIX_TOKEN forem preenchidos.
 ${DIODE_SUMMARY}==========================================================================
 EOF

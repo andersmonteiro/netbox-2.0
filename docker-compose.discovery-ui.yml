@@ -1,0 +1,39 @@
+# ==========================================================================
+# docker-compose.discovery-ui.yml
+#
+# Instalação STANDALONE: só a interface web de descoberta (discovery-ui),
+# sem subir NetBox/Postgres/Redis/nada -- pra clientes que já têm um
+# NetBox rodando (deste template ou de qualquer outra instalação) e só
+# querem a ferramenta de descoberta apontando pra ele via API.
+#
+# Uso (via instalador, recomendado):
+#   ./install-discovery-ui.sh
+#
+# Uso manual:
+#   cp .env.discovery-ui.example .env.discovery-ui   # preencha NETBOX_URL/NETBOX_TOKEN
+#   docker compose -f docker-compose.discovery-ui.yml --env-file .env.discovery-ui up -d --build
+#
+# Diferente do docker-compose.override.yml (instalação full), este
+# arquivo roda direto da RAIZ deste repositório -- não precisa copiar
+# nada pra dentro de um netbox-docker/, porque não tem netbox-docker
+# nenhum aqui. automation-scripts/ e discovery-ui/ já são pastas irmãs
+# deste arquivo, então o build.context "." já enxerga os dois direto.
+# ==========================================================================
+
+services:
+  discovery-ui:
+    build:
+      context: .
+      dockerfile: discovery-ui/Dockerfile
+    container_name: discovery-ui
+    restart: unless-stopped
+    environment:
+      NETBOX_URL: ${NETBOX_URL}
+      NETBOX_TOKEN: ${NETBOX_TOKEN}
+      DISCOVERY_UI_USER: ${DISCOVERY_UI_USER}
+      DISCOVERY_UI_PASSWORD: ${DISCOVERY_UI_PASSWORD}
+      FLASK_SECRET_KEY: ${DISCOVERY_UI_SECRET_KEY}
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./automation-scripts/discovery_output:/app/discovery_output

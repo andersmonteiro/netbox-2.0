@@ -1,8 +1,8 @@
-# Projeto NetBox — Docker + Automação de Preenchimento + Zabbix + Agente de IA
+# Projeto NetBox — Docker + Automação de Preenchimento + Descoberta de Rede
 
 Kit de deploy para NetBox via Docker (com suporte a plugins), mais um
-conjunto de automações para reduzir cadastro manual e integrações com
-Zabbix e com agentes de IA (via MCP).
+conjunto de automações para reduzir cadastro manual — incluindo a
+`discovery-ui`, interface web de descoberta de rede via SSH/SNMP.
 
 Este projeto **não reinventa** o docker-compose oficial do NetBox — ele
 estende o repositório oficial [`netbox-community/netbox-docker`](https://github.com/netbox-community/netbox-docker)
@@ -44,8 +44,12 @@ netbox-2.0/
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── templates/
-├── zabbix-sync/
-│   └── config.py                   <- config do netbox-zabbix-sync
+├── docker-compose.discovery-ui.yml <- instalação STANDALONE (só a discovery-ui, sem subir NetBox -- seção 3)
+├── install-discovery-ui.sh         <- instalador 1-comando da instalação standalone
+├── .env.discovery-ui.example       <- copie para .env.discovery-ui (instalação standalone)
+├── netbox-seed/                    <- catálogo de device types pré-cadastrado (seção 2.5)
+│   ├── device-catalog.sql          <- dump limpo (sem device/IP/usuário real de cliente)
+│   └── devicetype-images/          <- fotos de frente/costas referenciadas pelo dump
 └── orb-agent/
     └── agent.yaml.example          <- descoberta de rede opcional via Diode (seção 2.3, desligado por padrão)
 ```
@@ -147,8 +151,8 @@ mesmo com a senha certa.
 
 Acesse `http://SEU_SERVIDOR:8000` depois de alguns minutos.
 
-Isso já sobe, além do NetBox: Postgres, Redis, o worker, o
-housekeeping, o **netbox-zabbix-sync** e o **netbox-mcp-server** — todos
+Isso já sobe, além do NetBox: Postgres, Redis, o worker, o housekeeping
+e a **discovery-ui** (interface web de descoberta, seção 2.4) — todos
 definidos no `docker-compose.override.yml`.
 
 Requisitos: Docker ≥ 20.10.10 e Docker Compose ≥ 1.28 no servidor
@@ -572,90 +576,84 @@ não traz serial pela MIB-II padrão). Os arquivos aplicados são movidos
 pra `discovery_output/applied/` (não ficam pendentes de novo se você
 rodar `apply` de novo sem um `collect` novo antes).
 
-## 3. Integração com Zabbix
+### 2.5 Catálogo de device types pré-cadastrado
 
-Optei por **NetBox → Zabbix** (NetBox como fonte da verdade / CMDB,
-alimentando o Zabbix) usando o
-[netbox-zabbix-sync](https://github.com/TheNetworkGuy/netbox-zabbix-sync),
-que é o projeto community mais maduro para isso. É a direção mais comum
-porque evita conflito de "quem manda" nos dados — mas se você preferir o
-sentido inverso (Zabbix descobre e alimenta o NetBox) ou bidirecional,
-me avise que eu ajusto (as alternativas `SUSE/zabbix-netbox-sync` e
-`OpensourceICTSolutions/nbxsync` cobrem esses outros cenários).
+O `bootstrap.sh` já sobe o NetBox com um catálogo de ~100 device types
+(manufacturers, templates de interface, porta de força, etc.)
+pré-cadastrado, com as fotos de frente/costas de cada um — poupa o
+trabalho manual de cadastrar Device Type na mão pra equipamentos comuns
+(MikroTik, Huawei, Datacom, Furukawa, Dell, etc.).
 
-Já está definido como serviço no `docker-compose.override.yml`
-(container `netbox-zabbix-sync`, roda a cada 5 minutos). Falta você:
+Isso vem de dois arquivos:
 
-1. Preencher `ZABBIX_HOST` e `ZABBIX_TOKEN` no `.env`.
-2. Criar dois Custom Fields no NetBox (Admin > Custom Fields):
-   - `zabbix_hostid` (Integer, objeto: dcim > device)
-   - `zabbix_template` (Text, objeto: dcim > device_type) — só
-     necessário se você **não** usar Config Context para templates
-     (ver `zabbix-sync/config.py`, `templates_config_context`).
-3. Garantir que o usuário do Zabbix usado no token tenha permissão de
-   criar/editar/apagar hosts e hostgroups.
-4. Ajustar `zabbix-sync/config.py` conforme sua topologia (formato dos
-   hostgroups, mapeamento de inventário, etc. — comentado no arquivo).
+- `netbox-seed/device-catalog.sql` — dump do Postgres só com o catálogo
+  (manufacturers, device types, templates). **Não tem nenhum device,
+  IP ou usuário real** — essas tabelas são removidas do dump antes de
+  ir pro repositório (junto com sessão e log de auditoria), justamente
+  por este repositório ser público.
+- `netbox-seed/devicetype-images/` — as fotos referenciadas pelo dump
+  acima, mapeadas via `docker-compose.override.yml` direto pra dentro
+  do volume de mídia do NetBox (`/opt/netbox/netbox/media/devicetype-images`).
 
-## 4. Agente de IA via NetBox MCP Server
+**Isso só é restaurado na 1ª instalação**, quando o banco Postgres
+ainda está vazio (o `bootstrap.sh` sobe só o Postgres primeiro, checa
+se a tabela `django_migrations` existe, e só restaura se não existir).
+Numa reinstalação sobre um banco que já tem dado — seu ou de outro
+cliente — isso é pulado automaticamente, não sobrescreve nada.
 
-Você mencionou querer expor o NetBox para agentes de IA. O caminho mais
-direto e oficial é o [NetBox MCP Server](https://github.com/netboxlabs/netbox-mcp-server)
-(da própria NetBox Labs): um servidor MCP **somente leitura** por padrão
-(consulta devices, IPs, changelog, faz busca) — dá para conversar em
-linguagem natural com o inventário sem risco de um agente "quebrar" algo
-sem querer.
-
-Já está no `docker-compose.override.yml` (container
-`netbox-mcp-server`, HTTP na porta `8001`). Para conectar o Claude
-Desktop/Code a ele:
+Se quiser testar/reaplicar manualmente (ex: banco vazio fora do fluxo
+do `bootstrap.sh`):
 
 ```bash
-claude mcp add --transport http netbox http://SEU_SERVIDOR:8001/mcp
+cd netbox-docker
+docker compose up -d postgres
+docker compose exec -T postgres psql -U netbox -d netbox < ../netbox-seed/device-catalog.sql
 ```
 
-Ou no `claude_desktop_config.json`:
+Nem toda foto do catálogo tem uma imagem correspondente em
+`devicetype-images/` ainda — os device types sem foto aparecem sem
+imagem no NetBox até alguém subir o arquivo certo (Device Types > editar
+> Front/Rear image).
 
-```json
-{
-  "mcpServers": {
-    "netbox": {
-      "url": "http://SEU_SERVIDOR:8001/mcp"
-    }
-  }
-}
+## 3. Instalação standalone da discovery-ui (cliente que já tem NetBox)
+
+Pra clientes que **já têm um NetBox rodando** (deste template ou de
+qualquer outra instalação) e só querem a ferramenta de descoberta
+apontando pra ele via API — sem subir NetBox, Postgres, Redis nem nada
+do resto da stack. Sobe só o container `discovery-ui`.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/install-discovery-ui.sh | bash
 ```
 
-Depois disso dá pra perguntar coisas como "quais devices Cisco existem
-no site Matriz?" ou "quem alterou o roteador core na última semana?"
-diretamente no chat.
+Precisa das duas variáveis abaixo apontando pro NetBox do cliente
+(exporte antes do `curl`, já que não tem como o instalador adivinhar
+isso):
 
-**Se você quiser que o agente também *escreva* no NetBox** (não só
-consulte), há duas rotas, em ordem de recomendação:
-1. Usar o Diode SDK (Python/Go) como camada de ingestão — ele já foi
-   feito para isso, com reconciliação e auditoria.
-2. Fazer fork do `netbox-mcp-server` (é Apache 2.0, o próprio projeto
-   incentiva isso) e adicionar tools de escrita usando `pynetbox`.
+```bash
+export NETBOX_URL='http://IP_OU_HOST_DO_NETBOX_DO_CLIENTE:8000'
+export NETBOX_TOKEN='token-de-api-com-permissao-de-escrita-em-dcim-ipam'
+curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/install-discovery-ui.sh | bash
+```
 
-Não recomendo dar um token de escrita direto a um MCP genérico sem
-controle de escopo — prefira uma dessas duas opções para manter
-auditoria do que foi alterado por automação vs. por humano.
+O resto (login/senha da tela, chave de sessão) é gerado automaticamente,
+igual ao `bootstrap.sh` — aparece no resumo final. Detalhes de uso da
+interface (dashboard, cadastro de device, revisão/aprovação) estão na
+seção 2.4, é a mesma tela.
 
-## 5. Ordem sugerida de implementação
+## 4. Ordem sugerida de implementação
 
 1. Suba o NetBox (seção 1) e crie o superusuário.
 2. Cadastre a estrutura básica manualmente ou via CSV: Sites, Manufacturers,
    Device Types, Device Roles (seção 2.1).
 3. Rode o NAPALM collector para enriquecer os devices já cadastrados
    (seção 2.2).
-4. Configure o Zabbix sync (seção 3) para levar o inventário para
-   monitoramento.
-5. Conecte o MCP Server ao Claude (seção 4) para consultas em linguagem
-   natural.
-6. Se quiser descoberta contínua de rede, avalie subir o Diode +
-   orb-agent (seção 2.3) depois que o básico estiver rodando.
+4. Cadastre as credenciais de descoberta pela discovery-ui e rode as
+   primeiras descobertas (seção 2.4).
+5. Se quiser descoberta contínua de rede via Diode + orb-agent, avalie
+   subir isso depois (seção 2.3, opcional).
 
-## 6. Uso com GitHub (template público + múltiplos clientes)
+## 5. Uso com GitHub (template público + múltiplos clientes)
 
 Este repositório é **público** de propósito: é só ferramenta/automação
 genérica, sem dado de cliente (o `.gitignore` bloqueia `.env`,
@@ -673,7 +671,7 @@ nem license por lá. Depois, localmente:
 cd D:\projetos-natverk\netbox-2.0
 git init -b main
 git add -A
-git commit -m "Template inicial: NetBox + Docker + automações + Zabbix + MCP"
+git commit -m "Template inicial: NetBox + Docker + automações + descoberta de rede"
 git remote add origin https://github.com/andersmonteiro/netbox-2.0.git
 git push -u origin main
 ```
@@ -688,9 +686,9 @@ Zone" → **Change visibility** → Public.
    `curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash`
    — isso já clona o template, instala Docker, sobe tudo.
 2. Edite `netbox-2.0/netbox-docker/.env` (gerado automaticamente pelo
-   bootstrap com senha/token aleatórios) com os dados reais desse
-   cliente que faltam: `ZABBIX_HOST`, `ZABBIX_TOKEN`, etc. Esse arquivo
-   nunca é commitado, fica só no servidor do cliente.
+   bootstrap com senha/token aleatórios) se precisar ajustar algo
+   específico desse cliente. Esse arquivo nunca é commitado, fica só no
+   servidor do cliente.
 3. Se esse cliente precisar de alguma customização que não deveria ir
    pro template (ex: um plugin específico), ou você faz isso só
    localmente ali no servidor (sem commitar), ou mantém um fork do
@@ -701,11 +699,9 @@ Zone" → **Change visibility** → Public.
    outros clientes recebem rodando `bootstrap.sh`/`setup.sh` de novo
    (faz `git pull` internamente).
 
-## 7. Segurança — o que NUNCA deve ir para este repositório (é público!)
+## 6. Segurança — o que NUNCA deve ir para este repositório (é público!)
 
-- `.env` (senhas, tokens de API do NetBox/Zabbix/MCP)
-- Qualquer coisa em `zabbix-sync/config.py` com segredo hardcoded
-  (prefira variável de ambiente)
+- `.env` / `.env.discovery-ui` (senhas, tokens de API do NetBox)
 - Planilhas de importação com IPs/hostnames reais de cliente
 - `client-credentials.json` do Diode (contém `client_secret` OAuth2)
 - Nomes de clientes, topologia de rede real, ou qualquer coisa que
@@ -722,8 +718,6 @@ recriar o repositório.
 
 - [netbox-community/netbox-docker](https://github.com/netbox-community/netbox-docker)
 - [Using NetBox Plugins (wiki)](https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins)
-- [TheNetworkGuy/netbox-zabbix-sync](https://github.com/TheNetworkGuy/netbox-zabbix-sync)
-- [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server)
 - [netboxlabs/diode](https://github.com/netboxlabs/diode)
 - [netboxlabs/diode-netbox-plugin](https://github.com/netboxlabs/diode-netbox-plugin)
 - [netbox-community/netbox-topology-views](https://github.com/netbox-community/netbox-topology-views) (tabela de compatibilidade no README)

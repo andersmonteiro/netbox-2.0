@@ -13,7 +13,7 @@
 #        - plugin_requirements.txt
 #        - a pasta configuration/plugins.py (mescla com a configuration/ existente)
 #        - a pasta automation-scripts/
-#        - a pasta zabbix-sync/
+#        - a pasta discovery-ui/
 #        - o .env (copiado e preenchido a partir de .env.example)
 #   3. docker compose build --no-cache
 #   4. docker compose up -d
@@ -38,6 +38,12 @@ services:
       - "8000:8080"
     env_file:
       - .env
+    # Catálogo de fotos de device type (frente/costas) -- mapeia só a
+    # subpasta devicetype-images/ dentro do volume de media do NetBox,
+    # sem substituir o resto (image-attachments/ etc. continuam no
+    # volume nomeado padrão do netbox-docker). Ver README seção 2.5.
+    volumes:
+      - ./netbox-seed/devicetype-images:/opt/netbox/netbox/media/devicetype-images
     # O healthcheck padrão do netbox-docker (start_period 90s, interval
     # 15s, retries 3 = ~135s de tolerância) é curto demais pra 1ª subida,
     # que roda uma leva grande de migrations e pode levar ~10 minutos.
@@ -68,47 +74,6 @@ services:
     pull_policy: never
     env_file:
       - .env
-
-  # --------------------------------------------------------------------
-  # Automação: sincronização NetBox -> Zabbix (roda periodicamente)
-  # --------------------------------------------------------------------
-  netbox-zabbix-sync:
-    image: ghcr.io/thenetworkguy/netbox-zabbix-sync:main
-    container_name: netbox-zabbix-sync
-    restart: unless-stopped
-    depends_on:
-      - netbox
-    env_file:
-      - .env
-    volumes:
-      - ./zabbix-sync/config.py:/opt/netbox-zabbix/config.py:ro
-    # A imagem roda um sync único e encerra; o entrypoint abaixo faz um
-    # loop simples a cada 5 minutos. Ajuste o "sleep" conforme sua necessidade
-    # ou substitua por um agendamento via cron/systemd no host.
-    entrypoint: >
-      /bin/sh -c "while true; do
-        python3 /opt/netbox-zabbix/netbox_zabbix_sync.py -v;
-        sleep 300;
-      done"
-
-  # --------------------------------------------------------------------
-  # Agente de IA: NetBox MCP Server (leitura via LLM/Claude)
-  # --------------------------------------------------------------------
-  netbox-mcp-server:
-    image: netboxlabs/netbox-mcp-server:latest
-    container_name: netbox-mcp-server
-    restart: unless-stopped
-    depends_on:
-      - netbox
-    environment:
-      NETBOX_URL: ${MCP_NETBOX_URL}
-      NETBOX_TOKEN: ${MCP_NETBOX_TOKEN}
-      TRANSPORT: ${MCP_TRANSPORT}
-      HOST: 0.0.0.0
-      PORT: ${MCP_PORT}
-      ENABLE_PLUGIN_DISCOVERY: "true"
-    ports:
-      - "${MCP_PORT}:${MCP_PORT}"
 
   # --------------------------------------------------------------------
   # Interface web de descoberta de rede (login simples, sem Diode) --

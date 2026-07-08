@@ -6,6 +6,7 @@
 
 # Segredos / config por ambiente
 .env
+.env.discovery-ui
 **/client-data/
 **/*.secrets.py
 
@@ -16,6 +17,12 @@
 # Config real do Orb Agent (contém client_secret do Diode em texto
 # plano). Só o .example fica versionado.
 orb-agent/agent.yaml
+
+# Dumps de banco crus (não processados) -- só netbox-seed/device-catalog.sql
+# (limpo de senha/sessão/audit log, ver README seção 2.5) é versionado.
+ndoc_db_clean_install.sql
+*.sql
+!netbox-seed/device-catalog.sql
 
 # Saída do discovery_netbox.py -- JSON com IP/interface/hostname reais
 # de cliente, staging antes de aplicar no NetBox.
