@@ -244,12 +244,12 @@
           </li>
         </ul>
 
-        <div class="navbar-nav flex-row align-items-center ms-auto navbar-actions" style="display:flex !important; align-items:center !important; height:2.5rem !important;">
-          <div class="nav-item dropdown me-2" style="display:flex !important; align-items:center !important; height:2.5rem !important;">
+        <div class="navbar-nav flex-row align-items-center ms-auto navbar-actions" style="display:flex !important; flex-wrap:nowrap !important; align-items:center !important; height:2.5rem !important;">
+          <div class="nav-item dropdown me-2" style="display:flex !important; flex-shrink:0 !important; align-items:center !important; height:2.5rem !important;">
             <a href="#" class="nav-link" data-bs-toggle="dropdown" title="Status da API do NetBox"
-               style="display:flex !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important;">
-              <span id="api-status-badge" class="badge bg-secondary-lt" style="display:inline-flex !important; align-items:center !important; vertical-align:middle !important;">
-                <span id="api-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;"></span>
+               style="display:flex !important; flex-shrink:0 !important; flex-wrap:nowrap !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important; white-space:nowrap !important;">
+              <span id="api-status-badge" class="badge bg-secondary-lt" style="display:inline-flex !important; align-items:center !important; vertical-align:middle !important; white-space:nowrap !important;">
+                <span id="api-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;flex-shrink:0;"></span>
                 <span id="api-status-text">verificando…</span>
               </span>
             </a>
@@ -258,12 +258,12 @@
             </div>
           </div>
           <a href="#" class="nav-link" id="theme-toggle-btn" title="Alternar tema claro/escuro"
-             style="display:flex !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important;">
+             style="display:flex !important; flex-shrink:0 !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important;">
             <i class="ti" id="theme-toggle-icon"></i>
           </a>
-          <div class="nav-item dropdown" style="display:flex !important; align-items:center !important; height:2.5rem !important;">
+          <div class="nav-item dropdown" style="display:flex !important; flex-shrink:0 !important; align-items:center !important; height:2.5rem !important;">
             <a href="#" class="nav-link text-reset" data-bs-toggle="dropdown"
-               style="display:flex !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important;">
+               style="display:flex !important; flex-shrink:0 !important; flex-wrap:nowrap !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important; white-space:nowrap !important;">
               <span class="fw-medium">{{ session.get('username') }}</span>
               <i class="ti ti-chevron-down ms-1 text-secondary" style="font-size: .8rem;"></i>
             </a>
