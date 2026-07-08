@@ -37,6 +37,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).parent))
 import discovery_core as core
@@ -81,18 +82,40 @@ def load_settings():
             return {
                 "netbox_url": data.get("netbox_url") or NETBOX_URL or "",
                 "netbox_token": data.get("netbox_token") or NETBOX_TOKEN or "",
+                "ui_password_hash": data.get("ui_password_hash") or "",
             }
         except Exception:
             pass
-    return {"netbox_url": NETBOX_URL or "", "netbox_token": NETBOX_TOKEN or ""}
+    return {"netbox_url": NETBOX_URL or "", "netbox_token": NETBOX_TOKEN or "", "ui_password_hash": ""}
 
 
-def save_settings(url, token):
+def save_settings(**fields):
+    """Faz merge de 'fields' em cima do settings.json existente (em vez
+    de sobrescrever o arquivo inteiro) -- assim salvar a config da API
+    não apaga a senha trocada (ui_password_hash) e vice-versa, já que os
+    dois usam o mesmo arquivo."""
+    current = {}
+    if SETTINGS_PATH.exists():
+        try:
+            current = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            current = {}
+    current.update({k: v for k, v in fields.items() if v is not None})
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(
-        json.dumps({"netbox_url": url, "netbox_token": token}, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    SETTINGS_PATH.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def check_ui_password(password):
+    """Confere a senha de login. Se o operador já trocou a senha pela
+    tela 'Alterar senha', usa o hash salvo em settings.json; senão cai
+    pro DISCOVERY_UI_PASSWORD do .env (senha padrão definida na
+    instalação) -- assim a troca de senha funciona sem precisar mexer
+    no .env nem reiniciar o container, mesmo padrão já usado pra URL/
+    token do NetBox (ver load_settings/save_settings acima)."""
+    stored_hash = load_settings().get("ui_password_hash")
+    if stored_hash:
+        return check_password_hash(stored_hash, password)
+    return bool(password) and bool(UI_PASSWORD) and password == UI_PASSWORD
 
 
 def get_nb():
@@ -127,7 +150,7 @@ def login_required(view):
 
 # Rotas que não dependem do NetBox estar configurado (senão a gente
 # criaria um loop de redirect pra /settings).
-_NETBOX_INDEPENDENT_ENDPOINTS = {"login", "logout", "settings_view", "api_status", "static"}
+_NETBOX_INDEPENDENT_ENDPOINTS = {"login", "logout", "settings_view", "api_status", "change_password", "static"}
 
 
 @app.before_request
@@ -151,7 +174,7 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if username == UI_USER and password and password == UI_PASSWORD:
+        if username == UI_USER and password and check_ui_password(password):
             session["logged_in"] = True
             session["username"] = username
             return redirect(request.args.get("next") or url_for("dashboard"))
@@ -181,7 +204,7 @@ def settings_view():
             return redirect(url_for("settings_view"))
         if not token:
             token = current.get("netbox_token", "")
-        save_settings(url, token)
+        save_settings(netbox_url=url, netbox_token=token)
         flash("Configuração da API salva.", "success")
         return redirect(url_for("settings_view"))
 
@@ -195,6 +218,26 @@ def settings_view():
         netbox_url=current.get("netbox_url", ""),
         masked_token=masked_token,
     )
+
+
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        if not check_ui_password(current_password):
+            flash("Senha atual incorreta.", "error")
+        elif len(new_password) < 6:
+            flash("A nova senha precisa ter pelo menos 6 caracteres.", "error")
+        elif new_password != confirm_password:
+            flash("A confirmação não bate com a nova senha.", "error")
+        else:
+            save_settings(ui_password_hash=generate_password_hash(new_password))
+            flash("Senha alterada com sucesso.", "success")
+            return redirect(url_for("change_password"))
+    return render_template("change_password.html")
 
 
 @app.route("/api/status")
@@ -602,9 +645,9 @@ def discover():
 @app.route("/review")
 @login_required
 def review():
-    # Usado pra buscar o que já está salvo de verdade no NetBox (descrição
-    # e IP) por interface -- best-effort: se o NetBox estiver fora do ar
-    # nesse momento, a revisão continua funcionando só com o que veio da
+    # Usado pra buscar a descrição que já está salva de verdade no NetBox
+    # por interface -- best-effort: se o NetBox estiver fora do ar nesse
+    # momento, a revisão continua funcionando só com o que veio da
     # descoberta (ver try/except abaixo).
     try:
         nb = get_nb()
@@ -621,23 +664,21 @@ def review():
             interfaces = data.get("interfaces", [])
             all_names = [i.get("name") for i in interfaces if i.get("name")]
 
-            # Interfaces e IPs já existentes no NetBox pra esse device --
-            # uma chamada pra cada (não uma por interface), pra não gerar
-            # N+1 em devices com dezenas/centenas de interfaces.
+            # Interfaces já existentes no NetBox pra esse device -- uma
+            # chamada só (não uma por interface), pra não gerar N+1 em
+            # devices com dezenas/centenas de interfaces. O IP já
+            # atribuído no NetBox não é mais buscado aqui: a ferramenta
+            # existe pra ALIMENTAR o NetBox, então o que importa na
+            # revisão é o IP que a descoberta encontrou na porta (coluna
+            # "IP (descoberto)"), não o que já está lá.
             existing_by_norm = {}
-            ips_by_iface_id = {}
             device_id = data.get("device_id")
             if nb is not None and device_id:
                 try:
                     for ei in nb.dcim.interfaces.filter(device_id=device_id):
                         existing_by_norm[core.normalize_ifname(ei.name)] = ei
-                    for ip in nb.ipam.ip_addresses.filter(device_id=device_id):
-                        aoid = getattr(ip, "assigned_object_id", None)
-                        if aoid:
-                            ips_by_iface_id.setdefault(aoid, []).append(str(ip.address))
                 except Exception:
                     existing_by_norm = {}
-                    ips_by_iface_id = {}
 
             for iface in interfaces:
                 # Chute de tipo/flag de VLAN calculados aqui (não gravados
@@ -656,17 +697,14 @@ def review():
                     or (core.guess_parent_name(iface.get("name"), all_names) if iface["is_vlan"] else None)
                 )
 
-                # Descrição/IP REAIS já salvos no NetBox pra essa interface
+                # Descrição REAL já salva no NetBox pra essa interface
                 # (quando ela já existe) -- a descrição que vem da própria
                 # descoberta (SNMP ifDescr, por exemplo) costuma ser só o
                 # nome cru da porta, não o comentário que o operador já
                 # colocou no NetBox, então priorizamos o que já está salvo
-                # no campo de edição (o operador ainda pode trocar). O IP
-                # é só informativo (não editável aqui -- atribuir IP é
-                # outro fluxo).
+                # no campo de edição (o operador ainda pode trocar).
                 existing_if = existing_by_norm.get(core.normalize_ifname(iface.get("name")))
                 iface["existing_description"] = existing_if.description if existing_if else ""
-                iface["existing_ips"] = ips_by_iface_id.get(existing_if.id, []) if existing_if else []
 
             # Agrupa por tipo (físicas por velocidade crescente, depois
             # LAG/bridge/virtual) e ordena por nome dentro do mesmo tipo --

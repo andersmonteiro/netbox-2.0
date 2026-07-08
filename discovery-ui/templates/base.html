@@ -3,6 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    // Aplica o tema salvo ANTES do resto da página renderizar -- senão
+    // dava um "flash" do tema escuro padrão antes de trocar pro claro
+    // salvo. Precisa ficar bem no topo do <head>, antes do CSS carregar.
+    (function () {
+      try {
+        var saved = localStorage.getItem('nbo-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-bs-theme', saved);
+        }
+      } catch (e) {}
+    })();
+  </script>
   <title>{% block title %}NetBox Oracle{% endblock %}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
@@ -40,6 +53,76 @@
       --tblr-border-radius: .25rem;
       --tblr-border-radius-sm: .25rem;
       --tblr-border-radius-lg: .5rem;
+    }
+
+    /* Modo claro -- as variáveis acima (bloco ':root, [data-bs-theme=dark]')
+       valem SEMPRE por causa do ':root', então sem isso o modo claro
+       ficaria com fundo escuro e componentes claros misturados (ilegível).
+       Aqui é o mesmo esqueleto de cores, só invertido -- mantém o
+       acento teal da marca, troca fundo/superfície/texto pro claro. Como
+       tem a mesma especificidade do bloco acima, o navegador usa este
+       (que vem depois no arquivo) quando data-bs-theme=light. */
+    [data-bs-theme=light] {
+      --nbo-bg: #f3f5f6;
+      --nbo-surface: #ffffff;
+      --nbo-border: rgba(0, 168, 148, .22);
+      --nbo-accent: #00a894;
+      --nbo-accent-rgb: 0, 168, 148;
+      --nbo-text-muted: #5b6567;
+
+      --tblr-body-bg: var(--nbo-bg);
+      --tblr-bg-surface: var(--nbo-surface);
+      --tblr-border-color: var(--nbo-border);
+      --tblr-primary: var(--nbo-accent);
+      --tblr-primary-rgb: var(--nbo-accent-rgb);
+      --tblr-link-color: var(--nbo-accent);
+      --tblr-link-color-rgb: var(--nbo-accent-rgb);
+    }
+    [data-bs-theme=light] .navbar-brand .fw-bold { color: #04070a; }
+    [data-bs-theme=light] .btn-primary {
+      background: #04070a;
+      border-color: #04070a;
+      color: #fff;
+    }
+    [data-bs-theme=light] .btn-primary:hover, [data-bs-theme=light] .btn-primary:focus {
+      background: #1c2124;
+      border-color: #1c2124;
+      color: #fff;
+    }
+    [data-bs-theme=light] .btn-outline-secondary {
+      background: #eef0f1;
+      border-color: rgba(0,0,0,.12);
+      color: #04070a;
+    }
+    [data-bs-theme=light] .btn-outline-secondary:hover {
+      background: #e3e6e7;
+      border-color: rgba(0,0,0,.18);
+      color: #04070a;
+    }
+    [data-bs-theme=light] .form-control,
+    [data-bs-theme=light] .form-select {
+      background: #ffffff;
+      border-color: rgba(0,0,0,.16);
+      color: #04070a;
+    }
+    [data-bs-theme=light] .form-control:focus,
+    [data-bs-theme=light] .form-select:focus {
+      background: #ffffff;
+      color: #04070a;
+    }
+    /* O header usa a classe navbar-dark fixa (texto claro, pensado pra
+       barra escura) -- no modo claro isso ficaria ilegível (texto claro
+       em fundo claro), já que a navbar é transparente e mostra o fundo
+       da página por trás. Sobrescreve só no modo claro, com a mesma
+       "forma" de seletor que o Bootstrap usa (mesma especificidade +
+       escopo [data-bs-theme=light] em cima, pra garantir que ganha). */
+    [data-bs-theme=light] .navbar-dark .navbar-nav > .nav-item > .nav-link,
+    [data-bs-theme=light] .navbar-dark .navbar-nav > .nav-link {
+      color: rgba(4, 7, 10, .75);
+    }
+    [data-bs-theme=light] .navbar-dark .navbar-nav > .nav-item > .nav-link:hover,
+    [data-bs-theme=light] .navbar-dark .navbar-nav > .nav-link:hover {
+      color: #04070a;
     }
 
     body {
@@ -120,21 +203,27 @@
         </a>
         {% if session.get('logged_in') %}
         <div class="navbar-nav flex-row order-md-last align-items-center">
-          <span id="api-status-badge" class="badge bg-secondary-lt me-3" title="Status da API do NetBox">
-            <span id="api-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;"></span>
-            <span id="api-status-text">verificando…</span>
-          </span>
-          <div class="nav-item dropdown">
-            <a href="#" class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown">
-              <span class="avatar avatar-sm" style="background-color: var(--tblr-primary); color: #fff; font-weight: 600;">
-                {{ session.get('username', '?')|first|upper }}
+          <div class="nav-item dropdown me-3">
+            <a href="#" class="nav-link p-0" data-bs-toggle="dropdown" title="Status da API do NetBox">
+              <span id="api-status-badge" class="badge bg-secondary-lt">
+                <span id="api-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;"></span>
+                <span id="api-status-text">verificando…</span>
               </span>
-              <div class="d-none d-xl-block ps-2">
-                <div>{{ session.get('username') }}</div>
-              </div>
             </a>
             <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
               <a href="{{ url_for('settings_view') }}" class="dropdown-item"><i class="ti ti-settings me-2"></i>Configurações da API</a>
+            </div>
+          </div>
+          <a href="#" class="nav-link px-2 me-2" id="theme-toggle-btn" title="Alternar tema claro/escuro">
+            <i class="ti" id="theme-toggle-icon"></i>
+          </a>
+          <div class="nav-item dropdown">
+            <a href="#" class="nav-link d-flex lh-1 text-reset p-0 align-items-center" data-bs-toggle="dropdown">
+              <span class="fw-medium">{{ session.get('username') }}</span>
+              <i class="ti ti-chevron-down ms-1 text-secondary" style="font-size: .8rem;"></i>
+            </a>
+            <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+              <a href="{{ url_for('change_password') }}" class="dropdown-item"><i class="ti ti-key me-2"></i>Alterar senha</a>
               <a href="{{ url_for('logout') }}" class="dropdown-item"><i class="ti ti-logout me-2"></i>Sair</a>
             </div>
           </div>
@@ -176,9 +265,46 @@
           {% block content %}{% endblock %}
         </div>
       </div>
+      <footer class="footer footer-transparent d-print-none">
+        <div class="container-xl">
+          <div class="row text-center align-items-center flex-row-reverse">
+            <div class="col-12 col-lg-auto mt-lg-0">
+              <ul class="list-inline list-inline-dots mb-0 text-secondary">
+                <li class="list-inline-item">Desenvolvido por Anderson Monteiro</li>
+                <li class="list-inline-item">Todos os direitos reservados &copy; 2026</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/js/tabler.min.js"></script>
+  <script>
+    // Toggle de tema claro/escuro -- persiste em localStorage (ver script
+    // no <head> que aplica isso antes da página pintar, pra não dar
+    // flash do tema errado) e atualiza o ícone (lua = clique pra escurecer,
+    // sol = clique pra clarear -- mostra o que vai ACONTECER ao clicar).
+    (function () {
+      var html = document.documentElement;
+      var btn = document.getElementById('theme-toggle-btn');
+      var icon = document.getElementById('theme-toggle-icon');
+      if (!btn || !icon) return;
+      function paintIcon() {
+        var isDark = html.getAttribute('data-bs-theme') === 'dark';
+        icon.className = 'ti ' + (isDark ? 'ti-sun' : 'ti-moon');
+        btn.title = isDark ? 'Ativar modo claro' : 'Ativar modo escuro';
+      }
+      paintIcon();
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var next = html.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-bs-theme', next);
+        try { localStorage.setItem('nbo-theme', next); } catch (err) {}
+        paintIcon();
+      });
+    })();
+  </script>
   {% if session.get('logged_in') %}
   <script>
     (function () {
@@ -196,7 +322,7 @@
         var s = STATUS_MAP[status] || STATUS_MAP.unconfigured;
         dot.style.background = s.color;
         text.textContent = s.label;
-        badge.className = 'badge ' + s.cls + ' me-3';
+        badge.className = 'badge ' + s.cls;
       }
       function check() {
         fetch('{{ url_for("api_status") }}')

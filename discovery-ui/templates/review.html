@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Revisão · NetBox Oracle{% endblock %}
+{% block container_class %}container-fluid px-4{% endblock %}
 {% block content %}
 <div class="page-header d-print-none">
   <h2 class="page-title">Revisão de descobertas</h2>
@@ -45,17 +46,16 @@
     {% if item.data.interfaces %}
     <form method="post" action="{{ url_for('review_apply', filename=item.filename) }}">
       <div class="table-responsive">
-        <table class="table table-vcenter card-table">
+        <table class="table table-vcenter card-table table-review">
           <thead>
             <tr>
               <th class="w-1"><input type="checkbox" class="form-check-input m-0" checked onclick="this.closest('table').querySelectorAll('.if-cb').forEach(c => c.checked = this.checked)"></th>
-              <th>Interface</th>
-              <th>Tipo <i class="ti ti-info-circle text-secondary" title="Sugerido automaticamente pelo nome -- confira e troque se precisar"></i></th>
-              <th>Interface física (VLAN) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN -- escolha a porta física onde essa VLAN está"></i></th>
-              <th>Status</th>
-              <th>IP (NetBox) <i class="ti ti-info-circle text-secondary" title="IP(s) já atribuído(s) a essa interface no NetBox -- só informativo, atribuir IP é feito depois, direto no NetBox"></i></th>
-              <th>IP (descoberto) <i class="ti ti-info-circle text-secondary" title="IP(s) configurado(s) na porta, lido agora via SNMP e/ou SSH -- só informativo, não é gravado automaticamente no NetBox"></i></th>
-              <th>Descrição <i class="ti ti-info-circle text-secondary" title="Já vem preenchido com o que estiver salvo no NetBox pra essa interface -- edite se precisar"></i></th>
+              <th class="col-iface">Interface</th>
+              <th class="col-type">Tipo <i class="ti ti-info-circle text-secondary" title="Sugerido automaticamente pelo nome -- confira e troque se precisar"></i></th>
+              <th class="col-parent">Interface física (VLAN) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN -- escolha a porta física onde essa VLAN está"></i></th>
+              <th class="col-status">Status</th>
+              <th class="col-ip">IP (descoberto) <i class="ti ti-info-circle text-secondary" title="IP(s) configurado(s) na porta, lido agora via SNMP e/ou SSH -- ao aprovar, é isso que vai ser gravado no NetBox"></i></th>
+              <th class="col-desc">Descrição <i class="ti ti-info-circle text-secondary" title="Já vem preenchido com o que estiver salvo no NetBox pra essa interface -- edite se precisar"></i></th>
             </tr>
           </thead>
           <tbody>
@@ -90,7 +90,6 @@
               <td>
                 <span class="badge text-uppercase {{ 'bg-success-lt' if iface.oper_status == 'up' else 'bg-red-lt' }}">{{ iface.oper_status }}</span>
               </td>
-              <td class="text-secondary">{{ iface.existing_ips|join(', ') if iface.existing_ips else '—' }}</td>
               <td class="text-secondary">{{ iface.ip_addresses|join(', ') if iface.ip_addresses else '—' }}</td>
               <td><input type="text" name="desc_{{ loop.index0 }}" class="form-control form-control-sm" value="{{ iface.existing_description or iface.descr or '' }}"></td>
             </tr>
@@ -118,6 +117,20 @@
      no próprio card-header (o elemento com data-bs-toggle="collapse"). */
   .card-header[aria-expanded="false"] .review-chevron { transform: rotate(-90deg); }
   .review-chevron { display: inline-block; transition: transform 0.15s ease; }
+
+  /* Largura mínima por coluna -- sem isso o navegador espreme select/
+     input pra caber tudo na largura visível, cortando o texto (ex:
+     "SFP+ (10GE)" virando "SFP+…"). Com min-width, a tabela cresce mais
+     que o card quando precisa, e o .table-responsive (herdado do
+     Tabler) dá scroll horizontal em vez de espremer -- melhor que
+     truncar informação que o operador precisa ver inteira. */
+  .table-review { min-width: 1400px; }
+  .table-review .col-iface { min-width: 200px; }
+  .table-review .col-type { min-width: 190px; }
+  .table-review .col-parent { min-width: 190px; }
+  .table-review .col-status { min-width: 90px; }
+  .table-review .col-ip { min-width: 200px; }
+  .table-review .col-desc { min-width: 240px; }
 </style>
 {% endif %}
 {% endblock %}
