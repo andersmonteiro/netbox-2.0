@@ -2,12 +2,35 @@
 # ==========================================================================
 # bootstrap.sh
 #
-# Instalação completa em um servidor NOVO (sem Docker, sem nada). Pensado
-# para rodar direto no cliente com um único comando:
+# Instalador único pra dois cenários. Pensado pra rodar direto no
+# cliente com um único comando:
 #
 #   curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 #
-# O que ele faz:
+# Pergunta (ou detecta) qual dos dois modos usar:
+#
+#   1) COMPLETA -- servidor novo, sem nada instalado. Sobe NetBox +
+#      Postgres + NetBox Oracle do zero (fluxo de sempre).
+#   2) SÓ O NETBOX ORACLE -- pra servidor/cliente que já tem um NetBox
+#      rodando (deste template ou não). NÃO mexe no NetBox existente:
+#      não clona netbox-docker, não builda imagem nenhuma dele, não
+#      sobe Postgres, não restaura catálogo -- só sobe o container do
+#      NetBox Oracle apontando pro NetBox informado. Docker Engine em si
+#      e as dependências de sistema (git, nmap, python3...) instalam
+#      normalmente do mesmo jeito nos dois modos -- isso não toca em
+#      nada do que já está em produção.
+#
+# Como escolher o modo:
+#   - Rodando via "curl | bash" com terminal interativo: pergunta na
+#     hora (Enter = completa).
+#   - export INSTALL_MODE=discovery-only (ou =full) antes do curl, pra
+#     não perguntar (necessário em cron/CI, sem terminal).
+#   - Se NETBOX_URL e NETBOX_TOKEN já vierem exportados, assume
+#     discovery-only automaticamente (só fazem sentido nesse modo).
+#   - Rodando o arquivo direto: flags --discovery-only / --full.
+#   - Atalho: install-discovery-ui.sh (mesma coisa, já com o modo certo).
+#
+# O que a instalação COMPLETA faz:
 #   1. Instala dependências de sistema (git, curl, nmap, python3, openssl)
 #   2. Instala Docker Engine + Docker Compose plugin (script oficial da
 #      Docker), se ainda não estiverem instalados
@@ -18,7 +41,7 @@
 #      quando o banco ainda está vazio (ver seção 2.5 do README). Numa
 #      reinstalação sobre um banco que já tem dado, isso é pulado
 #      automaticamente pra não sobrescrever nada.
-#   6. Builda a imagem e sobe a stack (inclui a discovery-ui, interface
+#   6. Builda a imagem e sobe a stack (inclui o NetBox Oracle, interface
 #      web de descoberta em http://SEU_SERVIDOR:5050 -- login simples,
 #      pensada pro time comercial revisar/aprovar descobertas sem usar
 #      terminal) — a 1ª subida roda uma leva grande de migrations e
@@ -34,16 +57,22 @@
 # Variáveis de ambiente opcionais:
 #   TEMPLATE_REPO_URL   -> default: https://github.com/andersmonteiro/netbox-2.0.git
 #   INSTALL_DIR         -> default: /opt/netbox-2.0
+#   INSTALL_MODE        -> "full" ou "discovery-only" (ver acima)
 #   SUPERUSER_PASSWORD  -> default: gera senha aleatória. Exporte pra usar
 #                          uma senha fixa (ex: padrão da empresa) sem
 #                          nunca commitar ela no repositório público.
 #   SUPERUSER_API_TOKEN -> default: gera token aleatório (hex 40 chars).
 #   SUPERUSER_API_KEY   -> default: gera key aleatória (hex 32 chars).
 #   DISCOVERY_UI_PASSWORD -> default: gera senha aleatória. Senha de
-#                          login da interface web de descoberta
-#                          (discovery-ui, porta 5050) -- usuário fixo
+#                          login do NetBox Oracle (interface web de
+#                          descoberta, porta 5050) -- usuário fixo
 #                          "admin" (troque DISCOVERY_UI_USER no .env se
 #                          quiser outro).
+#   NETBOX_URL          -> só no modo discovery-only: URL do NetBox já
+#                          existente do cliente.
+#   NETBOX_TOKEN        -> só no modo discovery-only: token de API do
+#                          NetBox do cliente (permissão de escrita em
+#                          dcim/ipam).
 # ==========================================================================
 set -euo pipefail
 
@@ -68,9 +97,51 @@ fi
 CURRENT_USER="${SUDO_USER:-$USER}"
 
 # --------------------------------------------------------------------
+# Modo de instalação -- ver cabeçalho acima pra como escolher.
+# --------------------------------------------------------------------
+INSTALL_MODE="${INSTALL_MODE:-}"
+for _arg in "$@"; do
+    case "$_arg" in
+        --discovery-only) INSTALL_MODE=discovery-only ;;
+        --full) INSTALL_MODE=full ;;
+    esac
+done
+
+if [ -z "$INSTALL_MODE" ]; then
+    if [ -n "${NETBOX_URL:-}" ] && [ -n "${NETBOX_TOKEN:-}" ]; then
+        # NETBOX_URL/NETBOX_TOKEN só existem pra apontar pra um NetBox
+        # já existente -- se vieram definidos, é sinal claro do modo,
+        # sem precisar perguntar.
+        INSTALL_MODE=discovery-only
+    elif [ -r /dev/tty ]; then
+        echo ""
+        echo "Qual instalação você quer?"
+        echo "  1) Completa -- NetBox + Postgres + NetBox Oracle (servidor novo, sem nada instalado)"
+        echo "  2) Só o NetBox Oracle -- este servidor já tem um NetBox rodando (deste template"
+        echo "     ou não); não mexe nele, só sobe o container de descoberta apontando pra lá"
+        read -r -p "Escolha [1/2] (default: 1): " _mode_choice < /dev/tty || _mode_choice=""
+        case "$_mode_choice" in
+            2) INSTALL_MODE=discovery-only ;;
+            *) INSTALL_MODE=full ;;
+        esac
+    else
+        # Sem terminal interativo (cron/CI) e sem sinal via env -- mantém
+        # o comportamento histórico do curl|bash de sempre (instalação
+        # completa), pra não quebrar quem já usa o one-liner da seção 1.
+        INSTALL_MODE=full
+    fi
+fi
+
+if [ "$INSTALL_MODE" = "discovery-only" ]; then
+    STEP_TOTAL=4
+else
+    STEP_TOTAL=7
+fi
+
+# --------------------------------------------------------------------
 # 1. Dependências de sistema
 # --------------------------------------------------------------------
-log "1/7 Dependências do sistema..."
+log "1/$STEP_TOTAL Dependências do sistema..."
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "${ID:-}" in
@@ -92,7 +163,7 @@ fi
 # --------------------------------------------------------------------
 # 2. Docker Engine + Compose plugin
 # --------------------------------------------------------------------
-log "2/7 Verificando Docker..."
+log "2/$STEP_TOTAL Verificando Docker..."
 if ! command -v docker >/dev/null 2>&1; then
     echo "    Docker não encontrado, instalando via script oficial (get.docker.com)..."
     curl -fsSL https://get.docker.com | $SUDO sh
@@ -115,7 +186,7 @@ fi
 # --------------------------------------------------------------------
 # 3. Garantir que temos o template localmente
 # --------------------------------------------------------------------
-log "3/7 Localizando/obtendo o template..."
+log "3/$STEP_TOTAL Localizando/obtendo o template..."
 # Quando rodado via "curl | bash" não existe arquivo de script real,
 # então BASH_SOURCE[0] vem vazio -- com "set -u" isso quebraria sem o
 # ":-" abaixo. Nesse caso SCRIPT_DIR cai pro diretório atual (ex:
@@ -146,12 +217,89 @@ else
     REPO_DIR="$INSTALL_DIR"
 fi
 cd "$REPO_DIR"
-chmod +x setup.sh bootstrap.sh 2>/dev/null || true
+chmod +x setup.sh bootstrap.sh install-discovery-ui.sh 2>/dev/null || true
+
+# --------------------------------------------------------------------
+# Modo discovery-only: NÃO clona netbox-docker, não builda nem sobe
+# nada do NetBox -- só o container da discovery-ui, apontando pro
+# NetBox que já existe. Termina e sai aqui, sem tocar no resto do
+# script (que é tudo específico da instalação completa).
+# --------------------------------------------------------------------
+if [ "$INSTALL_MODE" = "discovery-only" ]; then
+    if [ -z "${NETBOX_URL:-}" ] || [ -z "${NETBOX_TOKEN:-}" ]; then
+        if [ -r /dev/tty ]; then
+            echo ""
+            read -r -p "URL do NetBox já existente (ex: http://192.168.1.10:8000): " NETBOX_URL < /dev/tty || NETBOX_URL=""
+            read -r -p "Token de API do NetBox (permissão de escrita em dcim/ipam): " NETBOX_TOKEN < /dev/tty || NETBOX_TOKEN=""
+        fi
+        if [ -z "${NETBOX_URL:-}" ] || [ -z "${NETBOX_TOKEN:-}" ]; then
+            echo "!!  NETBOX_URL e NETBOX_TOKEN são obrigatórios nesse modo (ele não sobe um" >&2
+            echo "    NetBox novo -- só aponta pro que já existe). Exporte antes e rode de novo:" >&2
+            echo "" >&2
+            echo "    export NETBOX_URL='http://IP_DO_NETBOX:8000'" >&2
+            echo "    export NETBOX_TOKEN='token-de-api-com-permissao-de-escrita'" >&2
+            echo "    curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash" >&2
+            exit 1
+        fi
+    fi
+
+    log "4/$STEP_TOTAL Preparando credenciais..."
+    DISCOVERY_ENV_FILE="$REPO_DIR/.env.discovery-ui"
+    if [ ! -f "$DISCOVERY_ENV_FILE" ]; then
+        cp "$REPO_DIR/.env.discovery-ui.example" "$DISCOVERY_ENV_FILE"
+    fi
+    sed -i "s|^NETBOX_URL=.*|NETBOX_URL=${NETBOX_URL}|" "$DISCOVERY_ENV_FILE"
+    sed -i "s|^NETBOX_TOKEN=.*|NETBOX_TOKEN=${NETBOX_TOKEN}|" "$DISCOVERY_ENV_FILE"
+    if [ -n "${DISCOVERY_UI_USER:-}" ]; then
+        sed -i "s|^DISCOVERY_UI_USER=.*|DISCOVERY_UI_USER=${DISCOVERY_UI_USER}|" "$DISCOVERY_ENV_FILE"
+    fi
+    if grep -q "^DISCOVERY_UI_PASSWORD=troque-esta-senha$" "$DISCOVERY_ENV_FILE" 2>/dev/null; then
+        if [ -n "${DISCOVERY_UI_PASSWORD:-}" ]; then
+            FINAL_DISCOVERY_UI_PASSWORD="$DISCOVERY_UI_PASSWORD"
+            echo "    Usando DISCOVERY_UI_PASSWORD fornecido via variável de ambiente."
+        else
+            FINAL_DISCOVERY_UI_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')"
+        fi
+        sed -i "s|^DISCOVERY_UI_PASSWORD=.*|DISCOVERY_UI_PASSWORD=${FINAL_DISCOVERY_UI_PASSWORD}|" "$DISCOVERY_ENV_FILE"
+    fi
+    if grep -q "^DISCOVERY_UI_SECRET_KEY=troque-esta-chave-aleatoria$" "$DISCOVERY_ENV_FILE" 2>/dev/null; then
+        FINAL_DISCOVERY_UI_SECRET_KEY="$(openssl rand -hex 24)"
+        sed -i "s|^DISCOVERY_UI_SECRET_KEY=.*|DISCOVERY_UI_SECRET_KEY=${FINAL_DISCOVERY_UI_SECRET_KEY}|" "$DISCOVERY_ENV_FILE"
+    fi
+
+    log "$STEP_TOTAL/$STEP_TOTAL Build + subida do container (NetBox Oracle)..."
+    (cd "$REPO_DIR" && docker compose -f docker-compose.discovery-ui.yml --env-file "$DISCOVERY_ENV_FILE" --progress=tty up -d --build < /dev/null)
+
+    SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    cat <<EOF
+
+==========================================================================
+Instalação concluída! (só NetBox Oracle -- o NetBox existente não foi
+tocado: nada de Postgres/build/restore rodou nesse modo)
+
+NetBox Oracle (descoberta de rede, apontando pro NetBox informado):
+NetBox:        ${NETBOX_URL}
+NetBox Oracle: http://${SERVER_IP:-SEU_SERVIDOR}:5050
+Usuário:       $(grep '^DISCOVERY_UI_USER=' "$DISCOVERY_ENV_FILE" | cut -d= -f2)
+Senha:         $(grep '^DISCOVERY_UI_PASSWORD=' "$DISCOVERY_ENV_FILE" | cut -d= -f2)
+
+*** Anote a senha acima agora — ela não aparece de novo. ***
+
+Antes de usar, confirme que os Custom Fields de descoberta já existem
+nesse NetBox (rode uma vez, se ainda não rodou):
+  cd $REPO_DIR/automation-scripts
+  python3 -m venv .venv && source .venv/bin/activate
+  pip install -r requirements.txt
+  NETBOX_URL=${NETBOX_URL} NETBOX_TOKEN=${NETBOX_TOKEN} python create_discovery_fields.py
+==========================================================================
+EOF
+    exit 0
+fi
 
 # --------------------------------------------------------------------
 # 4. setup.sh: clona netbox-docker oficial + aplica overlay + cria .env
 # --------------------------------------------------------------------
-log "4/7 Preparando a stack..."
+log "4/$STEP_TOTAL Preparando a stack..."
 ./setup.sh
 
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
@@ -258,7 +406,7 @@ fi
 # restaurar; se já existir, é uma reinstalação/atualização sobre um
 # banco que já tem dado real, e não tocamos em nada.
 # --------------------------------------------------------------------
-log "5/7 Catálogo de device types..."
+log "5/$STEP_TOTAL Catálogo de device types..."
 SEED_SQL="$REPO_DIR/netbox-seed/device-catalog.sql"
 if [ ! -f "$SEED_SQL" ]; then
     echo "    netbox-seed/device-catalog.sql não encontrado, pulando."
@@ -320,10 +468,10 @@ fi
 # relação com a saída do "up -d" em si.
 NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
-log "6/7 Build da imagem (com plugins)..."
+log "6/$STEP_TOTAL Build da imagem (com plugins)..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty build --no-cache < /dev/null)
 
-log "7/7 Subindo a stack..."
+log "7/$STEP_TOTAL Subindo a stack..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty up -d < /dev/null)
 echo "    Stack no ar."
 
@@ -379,7 +527,7 @@ Usuário:       $(grep '^SUPERUSER_NAME=' "$ENV_FILE" | cut -d= -f2)
 Senha:         $(grep '^SUPERUSER_PASSWORD=' "$ENV_FILE" | cut -d= -f2)
 API Token:     $(grep '^SUPERUSER_API_TOKEN=' "$ENV_FILE" | cut -d= -f2)
 
-Descoberta de rede (interface web):
+NetBox Oracle (descoberta de rede, interface web):
 URL:           http://${SERVER_IP:-SEU_SERVIDOR}:5050
 Usuário:       $(grep '^DISCOVERY_UI_USER=' "$ENV_FILE" | cut -d= -f2)
 Senha:         $(grep '^DISCOVERY_UI_PASSWORD=' "$ENV_FILE" | cut -d= -f2)

@@ -25,7 +25,7 @@ services:
     build:
       context: .
       dockerfile: discovery-ui/Dockerfile
-    container_name: discovery-ui
+    container_name: netbox-oracle
     restart: unless-stopped
     environment:
       NETBOX_URL: ${NETBOX_URL}

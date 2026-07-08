@@ -62,19 +62,41 @@ usa a última versão estável. Cada cliente tem seu próprio `.env`
 
 ### Servidor novo, sem nada instalado (recomendado para clientes)
 
-Um único comando: instala Docker + dependências (git, nmap, python3...),
-clona este template, sobe o `netbox-docker` oficial com o overlay
-aplicado, gera senha/token do superusuário automaticamente, **sobe
-também a discovery-ui** (interface web de descoberta, seção 2.4 —
-login simples, pensada pro time comercial revisar/aprovar descobertas
-sem usar terminal) e deixa a stack no ar.
+Um único comando pros dois cenários — ele pergunta na hora qual dos
+dois você quer (Enter = completa):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 ```
 
-No final ele imprime a URL, usuário, senha e token gerados (NetBox e
-discovery-ui) — anote na hora, não aparecem de novo.
+**1) Completa** — instala Docker + dependências (git, nmap, python3...),
+clona este template, sobe o `netbox-docker` oficial com o overlay
+aplicado, gera senha/token do superusuário automaticamente, **sobe
+também a discovery-ui** (interface web de descoberta, seção 2.4 —
+login simples, pensada pro time comercial revisar/aprovar descobertas
+sem usar terminal) e deixa a stack no ar. No final ele imprime a URL,
+usuário, senha e token gerados (NetBox e discovery-ui) — anote na hora,
+não aparecem de novo.
+
+**2) Só a discovery-ui** — pra servidor/cliente que **já tem um NetBox
+rodando** (deste template ou não) e você não quer mexer nele: não
+clona `netbox-docker`, não builda nem sobe Postgres/NetBox, não
+restaura catálogo — só sobe o container da discovery-ui apontando pro
+NetBox informado. Docker Engine em si instala normalmente do mesmo
+jeito nos dois modos (isso não afeta o que já está em produção). Pede
+a URL e o token do NetBox existente na hora; ver seção 3 pra rodar sem
+interação (env vars, cron/CI).
+
+Sem terminal interativo (ex: `curl | bash` num script automatizado sem
+tty), o default é a instalação completa — pra não quebrar automações
+que já usam o one-liner de sempre.
+
+**Senha do superusuário**: se você não tiver exportado
+`SUPERUSER_PASSWORD` antes, o script gera uma senha aleatória, mostra
+ela na tela e pergunta "Usar essa senha? (Y/n)". Dar Enter (ou "y")
+aceita a gerada; "n" pede pra digitar uma senha sua (digitação oculta,
+como em `sudo`). Funciona normalmente mesmo rodando via `curl | bash`.
+Ela aparece de novo no resumo final da instalação.
 
 **Senha do superusuário**: se você não tiver exportado
 `SUPERUSER_PASSWORD` antes, o script gera uma senha aleatória, mostra
@@ -412,15 +434,23 @@ imagem no NetBox até alguém subir o arquivo certo (Device Types > editar
 Pra clientes que **já têm um NetBox rodando** (deste template ou de
 qualquer outra instalação) e só querem a ferramenta de descoberta
 apontando pra ele via API — sem subir NetBox, Postgres, Redis nem nada
-do resto da stack. Sobe só o container `discovery-ui`.
+do resto da stack, e **sem mexer no que já está em produção**. Sobe só
+o container `discovery-ui`.
+
+É o mesmo `bootstrap.sh` da seção 1, só que no modo "só discovery-ui" —
+rodando com terminal interativo ele pergunta na hora (opção 2). Pra
+pular a pergunta (obrigatório em cron/CI, sem terminal, ou só pra não
+ter que escolher), exporte as duas variáveis abaixo e ele detecta o
+modo sozinho:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/install-discovery-ui.sh | bash
+export NETBOX_URL='http://IP_OU_HOST_DO_NETBOX_DO_CLIENTE:8000'
+export NETBOX_TOKEN='token-de-api-com-permissao-de-escrita-em-dcim-ipam'
+curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 ```
 
-Precisa das duas variáveis abaixo apontando pro NetBox do cliente
-(exporte antes do `curl`, já que não tem como o instalador adivinhar
-isso):
+Atalho equivalente (mesma coisa, já fixo no modo certo — útil se você
+não quiser depender da detecção automática):
 
 ```bash
 export NETBOX_URL='http://IP_OU_HOST_DO_NETBOX_DO_CLIENTE:8000'
@@ -428,10 +458,10 @@ export NETBOX_TOKEN='token-de-api-com-permissao-de-escrita-em-dcim-ipam'
 curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/install-discovery-ui.sh | bash
 ```
 
-O resto (login/senha da tela, chave de sessão) é gerado automaticamente,
-igual ao `bootstrap.sh` — aparece no resumo final. Detalhes de uso da
-interface (dashboard, cadastro de device, revisão/aprovação) estão na
-seção 2.4, é a mesma tela.
+O resto (login/senha da tela, chave de sessão) é gerado automaticamente
+— aparece no resumo final. Detalhes de uso da interface (dashboard,
+cadastro de device, revisão/aprovação) estão na seção 2.4, é a mesma
+tela.
 
 ## 4. Ordem sugerida de implementação
 

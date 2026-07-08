@@ -31,6 +31,7 @@ services:
   netbox:
     image: netbox:latest-plugins
     pull_policy: never
+    container_name: netbox
     build:
       context: .
       dockerfile: Dockerfile-Plugins
@@ -66,28 +67,49 @@ services:
   netbox-worker:
     image: netbox:latest-plugins
     pull_policy: never
+    container_name: netbox-worker
     env_file:
       - .env
 
   netbox-housekeeping:
     image: netbox:latest-plugins
     pull_policy: never
+    container_name: netbox-housekeeping
     env_file:
       - .env
 
   # --------------------------------------------------------------------
-  # Interface web de descoberta de rede (login simples) -- ver README.md
-  # seção 2.4. Build a partir da raiz (context: .) porque
-  # o Dockerfile precisa copiar automation-scripts/discovery_core.py,
-  # compartilhado com o CLI. O volume abaixo aponta pra mesma pasta
-  # discovery_output/ usada pelo CLI (discovery_netbox.py), então um
-  # device coletado por um aparece pra revisão no outro.
+  # postgres/redis/redis-cache vêm do docker-compose.yml oficial do
+  # netbox-docker (não redefinimos o resto do serviço aqui, só o nome
+  # do container) -- sem isso o compose usa o padrão
+  # "<pasta>-<serviço>-<réplica>" (ex: netbox-docker-postgres-1).
+  # --------------------------------------------------------------------
+  postgres:
+    container_name: postgres
+
+  redis:
+    container_name: redis
+
+  redis-cache:
+    container_name: redis-cache
+
+  # --------------------------------------------------------------------
+  # NetBox Oracle: interface web de descoberta de rede (login simples)
+  # -- ver README.md seção 2.4. Build a partir da raiz (context: .)
+  # porque o Dockerfile precisa copiar
+  # automation-scripts/discovery_core.py, compartilhado com o CLI. O
+  # volume abaixo aponta pra mesma pasta discovery_output/ usada pelo
+  # CLI (discovery_netbox.py), então um device coletado por um aparece
+  # pra revisão no outro. A pasta/serviço continuam se chamando
+  # "discovery-ui" internamente (é o nome técnico usado no compose,
+  # Dockerfile, bootstrap.sh etc.) -- só o container e a interface é
+  # que se chamam "NetBox Oracle".
   # --------------------------------------------------------------------
   discovery-ui:
     build:
       context: .
       dockerfile: discovery-ui/Dockerfile
-    container_name: discovery-ui
+    container_name: netbox-oracle
     restart: unless-stopped
     depends_on:
       - netbox
