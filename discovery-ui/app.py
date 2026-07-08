@@ -103,6 +103,19 @@ def get_nb():
     return core.get_client(url, token)
 
 
+def _display_case(value):
+    """Ajeita a exibição de nomes vindos do NetBox (Site, Manufacturer,
+    Device Type, Platform...): quando o valor está TODO em minúsculo
+    (ex: 'mikrotik', 'santarem'), aplica Title Case só pra leitura na
+    tela. Não mexe em nada que já tenha alguma letra maiúscula (evita
+    estragar siglas/nomes de marca digitados certo, tipo 'MikroTik',
+    'ZTE', 'IOS-XE') -- e não muda o valor usado pra salvar, só o texto
+    mostrado."""
+    if not value:
+        return value
+    return value.title() if value == value.lower() else value
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -223,36 +236,70 @@ def dashboard():
     except Exception:
         platforms = []
 
+    try:
+        sites_raw = list(nb.dcim.sites.all())
+    except Exception:
+        sites_raw = []
+    sites = []
+    for s in sites_raw:
+        s_region = ""
+        try:
+            if getattr(s, "region", None):
+                s_region = _display_case(str(s.region))
+        except Exception:
+            s_region = ""
+        sites.append({"id": s.id, "name": _display_case(s.name), "region": s_region})
+    sites.sort(key=lambda x: x["name"].lower())
+
+    try:
+        device_types_raw = list(nb.dcim.device_types.all())
+    except Exception:
+        device_types_raw = []
+    device_types = []
+    for dt in device_types_raw:
+        manuf = ""
+        try:
+            if getattr(dt, "manufacturer", None):
+                manuf = _display_case(str(dt.manufacturer))
+        except Exception:
+            manuf = ""
+        model = _display_case(str(dt.model))
+        label = f"{manuf} — {model}" if manuf else model
+        device_types.append({"id": dt.id, "label": label, "manufacturer": manuf})
+    device_types.sort(key=lambda x: x["label"].lower())
+
     rows = []
     for d in devices:
         cf = d.custom_fields or {}
         method = cf.get("discovery_method")
         has_cred = bool(cf.get("discovery_username") and cf.get("discovery_password")) if method == "ssh" else bool(cf.get("discovery_snmp_community")) if method == "snmp" else False
-        site = str(d.site) if d.site else ""
+        site = _display_case(str(d.site)) if d.site else ""
         region = ""
         try:
             if d.site and getattr(d.site, "region", None):
-                region = str(d.site.region)
+                region = _display_case(str(d.site.region))
         except Exception:
             region = ""
         manufacturer = ""
         device_type_model = ""
         try:
             if d.device_type:
-                device_type_model = str(d.device_type)
+                device_type_model = _display_case(str(d.device_type))
                 if getattr(d.device_type, "manufacturer", None):
-                    manufacturer = str(d.device_type.manufacturer)
+                    manufacturer = _display_case(str(d.device_type.manufacturer))
         except Exception:
             pass
         rows.append({
             "id": d.id,
             "name": d.name,
             "site": site,
+            "site_id": d.site.id if d.site else None,
             "region": region,
             "manufacturer": manufacturer,
             "device_type_model": device_type_model,
+            "device_type_id": d.device_type.id if d.device_type else None,
             "primary_ip": str(d.primary_ip4).split("/")[0] if d.primary_ip4 else None,
-            "platform": str(d.platform) if d.platform else None,
+            "platform": _display_case(str(d.platform)) if d.platform else None,
             "platform_id": d.platform.id if d.platform else None,
             "method": method,
             "has_cred": has_cred,
@@ -270,6 +317,7 @@ def dashboard():
 
     return render_template(
         "dashboard.html", rows=rows, pending_count=pending_count, platforms=platforms,
+        sites=sites, device_types=device_types,
         filter_sites=filter_sites, filter_regions=filter_regions, filter_manufacturers=filter_manufacturers,
     )
 
@@ -364,8 +412,9 @@ def device_edit(device_id):
 @app.route("/device/<int:device_id>/inline-update", methods=["POST"])
 @login_required
 def device_inline_update(device_id):
-    """Endpoint AJAX usado pela linha expansível do dashboard -- aplica
-    nome/platform/IP/credenciais de descoberta sem sair da página."""
+    """Endpoint AJAX usado pela edição inline (mesma linha) do dashboard
+    -- aplica nome/site/device type/platform/IP/credenciais de
+    descoberta sem sair da página."""
     try:
         nb = get_nb()
         device = nb.dcim.devices.get(device_id)
@@ -383,6 +432,14 @@ def _apply_discovery_form(nb, device, form):
     new_name = form.get("name", "").strip()
     if new_name and new_name != device.name:
         device.update({"name": new_name})
+
+    site_id = form.get("site_id")
+    if site_id:
+        device.update({"site": int(site_id)})
+
+    device_type_id = form.get("device_type_id")
+    if device_type_id:
+        device.update({"device_type": int(device_type_id)})
 
     platform_id = form.get("platform_id")
     if platform_id:

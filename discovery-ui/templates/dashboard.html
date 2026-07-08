@@ -61,19 +61,23 @@
   {% if rows %}
   <form method="post" action="{{ url_for('discover') }}" id="discover-form">
     <div class="table-responsive">
-      <table class="table table-vcenter card-table" id="devices-table">
+      <table class="table table-vcenter card-table" id="devices-table" style="min-width: 1600px;">
         <thead>
           <tr>
             <th class="w-1"><input type="checkbox" class="form-check-input m-0" id="select-all-cb"></th>
-            <th class="w-1"></th>
-            <th>Nome</th>
-            <th>Site</th>
-            <th>Região</th>
-            <th>Fabricante</th>
-            <th>IP de gerência</th>
-            <th>Platform</th>
-            <th>Método</th>
-            <th>Status</th>
+            <th class="w-1">Ações</th>
+            <th style="min-width:140px;">Nome</th>
+            <th style="min-width:150px;">Site</th>
+            <th style="min-width:110px;">Região</th>
+            <th style="min-width:180px;">Fabricante</th>
+            <th style="min-width:140px;">IP de gerência</th>
+            <th style="min-width:150px;">Platform</th>
+            <th style="min-width:130px;">Método</th>
+            <th style="min-width:130px;">Usuário (SSH)</th>
+            <th style="min-width:140px;">Senha (SSH)</th>
+            <th style="min-width:90px;">Porta SSH</th>
+            <th style="min-width:140px;">Community (SNMP)</th>
+            <th style="min-width:100px;">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -86,26 +90,89 @@
             data-site="{{ r.site }}"
             data-region="{{ r.region }}"
             data-manufacturer="{{ r.manufacturer }}"
+            data-device-type-model="{{ r.device_type_model }}"
           >
             <td>
               <input
                 type="checkbox" class="form-check-input m-0 dev-cb" name="device_ids" value="{{ r.id }}"
-                {% if not r.ready %}disabled title="Configure o método de descoberta antes (clique na seta pra editar)"{% endif %}
+                {% if not r.ready %}disabled title="Configure o método de descoberta antes (clique no lápis pra editar)"{% endif %}
               >
             </td>
-            <td>
-              <button type="button" class="btn btn-icon btn-sm btn-ghost-secondary row-toggle" data-id="{{ r.id }}" title="editar">
-                <i class="ti ti-chevron-right"></i>
+            <td class="text-nowrap">
+              <button type="button" class="btn btn-icon btn-sm btn-ghost-secondary row-edit-toggle" title="editar">
+                <i class="ti ti-edit"></i>
               </button>
+              <button type="button" class="btn btn-icon btn-sm btn-ghost-success row-save" style="display:none" title="salvar">
+                <i class="ti ti-check"></i>
+              </button>
+              <button type="button" class="btn btn-icon btn-sm btn-ghost-secondary row-cancel" style="display:none" title="cancelar">
+                <i class="ti ti-x"></i>
+              </button>
+              <div class="f-alert text-danger small mt-1" style="display:none; max-width:180px; white-space:normal;"></div>
             </td>
-            <td class="fw-medium">{{ r.name }}</td>
-            <td class="text-secondary">{{ r.site or "—" }}</td>
-            <td class="text-secondary">{{ r.region or "—" }}</td>
-            <td class="text-secondary">{{ r.manufacturer or "—" }}</td>
-            <td class="text-secondary">{{ r.primary_ip or "—" }}</td>
-            <td class="text-secondary">{{ r.platform or "—" }}</td>
             <td>
-              {% if r.method %}<span class="badge bg-teal-lt badge-method">{{ r.method|upper }}</span>{% else %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
+              <span class="view-val">{{ r.name }}</span>
+              <input type="text" class="edit-val form-control form-control-sm f-name" value="{{ r.name }}" style="display:none">
+            </td>
+            <td>
+              <span class="view-val text-secondary">{{ r.site or "—" }}</span>
+              <select class="edit-val form-select form-select-sm f-site" style="display:none">
+                <option value="">— selecione —</option>
+                {% for s in sites %}
+                <option value="{{ s.id }}" data-region="{{ s.region }}" {% if r.site_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <span class="region-val text-secondary">{{ r.region or "—" }}</span>
+            </td>
+            <td>
+              <span class="view-val text-secondary">{{ r.manufacturer or "—" }}</span>
+              <select class="edit-val form-select form-select-sm f-device-type" style="display:none">
+                <option value="">— selecione —</option>
+                {% for dt in device_types %}
+                <option value="{{ dt.id }}" data-manufacturer="{{ dt.manufacturer }}" {% if r.device_type_id == dt.id %}selected{% endif %}>{{ dt.label }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <span class="view-val text-secondary">{{ r.primary_ip or "—" }}</span>
+              <input type="text" class="edit-val form-control form-control-sm f-ip" value="{{ r.primary_ip or '' }}" style="display:none" placeholder="ex: 10.0.0.1">
+            </td>
+            <td>
+              <span class="view-val text-secondary">{{ r.platform or "—" }}</span>
+              <select class="edit-val form-select form-select-sm f-platform" style="display:none">
+                <option value="">— selecione —</option>
+                {% for p in platforms %}
+                <option value="{{ p.id }}" data-slug="{{ p.slug }}" {% if r.platform_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <span class="view-val">
+                {% if r.method %}<span class="badge bg-teal-lt badge-method">{{ r.method|upper }}</span>{% else %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
+              </span>
+              <select class="edit-val form-select form-select-sm f-method" style="display:none">
+                <option value="">— selecione —</option>
+                <option value="ssh" {% if r.method == 'ssh' %}selected{% endif %}>SSH (NAPALM)</option>
+                <option value="snmp" {% if r.method == 'snmp' %}selected{% endif %}>SNMP</option>
+              </select>
+            </td>
+            <td>
+              <span class="view-val text-secondary">{{ r.cf_username or "—" }}</span>
+              <input type="text" class="edit-val form-control form-control-sm f-username f-ssh-only" value="{{ r.cf_username }}" style="display:none" autocomplete="off">
+            </td>
+            <td>
+              <span class="view-val text-secondary">—</span>
+              <input type="password" class="edit-val form-control form-control-sm f-password f-ssh-only" style="display:none" placeholder="manter atual" autocomplete="new-password">
+            </td>
+            <td>
+              <span class="view-val text-secondary">{{ r.cf_ssh_port or "—" }}</span>
+              <input type="number" class="edit-val form-control form-control-sm f-ssh-port f-ssh-only" value="{{ r.cf_ssh_port }}" style="display:none" placeholder="22">
+            </td>
+            <td>
+              <span class="view-val text-secondary">{{ r.cf_snmp_community or "—" }}</span>
+              <input type="text" class="edit-val form-control form-control-sm f-community f-snmp-only" value="{{ r.cf_snmp_community }}" style="display:none" autocomplete="off">
             </td>
             <td>
               {% if r.ready %}
@@ -113,65 +180,6 @@
               {% else %}
                 <span class="badge bg-red-lt"><i class="ti ti-circle-x me-1"></i>incompleto</span>
               {% endif %}
-            </td>
-          </tr>
-          <tr class="edit-row" id="edit-row-{{ r.id }}" data-device-type-model="{{ r.device_type_model }}" style="display:none">
-            <td colspan="10" class="bg-body-tertiary">
-              <div class="row g-3 py-2">
-                <div class="col-md-3">
-                  <label class="form-label mb-1">Nome</label>
-                  <input type="text" class="form-control form-control-sm f-name" value="{{ r.name }}">
-                </div>
-                <div class="col-md-3">
-                  <label class="form-label mb-1">IP de gerência</label>
-                  <input type="text" class="form-control form-control-sm f-ip" value="{{ r.primary_ip or '' }}" placeholder="ex: 10.0.0.1">
-                </div>
-                <div class="col-md-3">
-                  <label class="form-label mb-1">Método de descoberta</label>
-                  <select class="form-select form-select-sm f-method">
-                    <option value="">— selecione —</option>
-                    <option value="ssh" {% if r.method == 'ssh' %}selected{% endif %}>SSH (NAPALM)</option>
-                    <option value="snmp" {% if r.method == 'snmp' %}selected{% endif %}>SNMP</option>
-                  </select>
-                </div>
-                <div class="col-md-3 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
-                  <label class="form-label mb-1">Platform</label>
-                  <select class="form-select form-select-sm f-platform">
-                    <option value="">— selecione —</option>
-                    {% for p in platforms %}
-                    <option value="{{ p.id }}" data-slug="{{ p.slug }}" {% if r.platform_id == p.id %}selected{% endif %}>{{ p.name }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-
-                <div class="col-md-3 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
-                  <label class="form-label mb-1">Usuário (SSH)</label>
-                  <input type="text" class="form-control form-control-sm f-username" value="{{ r.cf_username }}" autocomplete="off">
-                </div>
-                <div class="col-md-3 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
-                  <label class="form-label mb-1">Senha (SSH)</label>
-                  <input type="password" class="form-control form-control-sm f-password" placeholder="deixe em branco pra manter" autocomplete="new-password">
-                </div>
-                <div class="col-md-2 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
-                  <label class="form-label mb-1">Porta SSH</label>
-                  <input type="number" class="form-control form-control-sm f-ssh-port" value="{{ r.cf_ssh_port }}" placeholder="22">
-                </div>
-                <div class="col-md-3 f-snmp-fields" style="{% if r.method != 'snmp' %}display:none{% endif %}">
-                  <label class="form-label mb-1">Community (SNMP)</label>
-                  <input type="text" class="form-control form-control-sm f-community" value="{{ r.cf_snmp_community }}" autocomplete="off">
-                </div>
-
-                <div class="col-12 f-hint text-secondary small" style="display:none"></div>
-
-                <div class="col-12 f-alert" style="display:none"></div>
-
-                <div class="col-12">
-                  <button type="button" class="btn btn-primary btn-sm f-save" data-id="{{ r.id }}">
-                    <i class="ti ti-device-floppy me-1"></i>Salvar
-                  </button>
-                  <button type="button" class="btn btn-outline-secondary btn-sm row-toggle" data-id="{{ r.id }}">Cancelar</button>
-                </div>
-              </div>
             </td>
           </tr>
           {% endfor %}
@@ -216,8 +224,6 @@
         (!region || tr.dataset.region === region) &&
         (!manufacturer || tr.dataset.manufacturer === manufacturer);
       tr.style.display = matches ? '' : 'none';
-      var editRow = document.getElementById('edit-row-' + tr.dataset.id);
-      if (editRow && !matches) editRow.style.display = 'none';
     });
   }
 
@@ -242,7 +248,7 @@
   });
 
   // ------------------------------------------------------------------
-  // Edição inline (linha expansível)
+  // Edição inline -- tudo na mesma linha, sem painel expandido.
   // ------------------------------------------------------------------
 
   // Heurística fabricante -> método/plataforma sugeridos. Baseado na
@@ -251,8 +257,8 @@
   // (linha roteador/switch, driver comunitário huawei_vrp). OLTs Huawei
   // usam outra linha de produto (sem driver NAPALM), por isso o caso
   // Huawei checa o modelo do device type em busca de "OLT" antes de
-  // sugerir SSH -- se parecer uma OLT, sugerimos SNMP em vez disso.
-  // Os demais (MikroTik, Datacom, e todas as OLTs de outras marcas) não
+  // sugerir SSH -- se parecer uma OLT, sugerimos SNMP em vez disso. Os
+  // demais (MikroTik, Datacom, e todas as OLTs de outras marcas) não
   // têm driver NAPALM nenhum, então a única opção viável é SNMP.
   var MANUFACTURER_RULES = [
     { match: /cisco/i, method: 'ssh', platformSlug: 'ios' },
@@ -283,80 +289,118 @@
     return null;
   }
 
-  function toggleMethodFields(editRow, method) {
-    var sshFields = editRow.querySelectorAll('.f-ssh-fields');
-    var snmpFields = editRow.querySelectorAll('.f-snmp-fields');
-    sshFields.forEach(function (el) { el.style.display = method === 'ssh' ? '' : 'none'; });
-    snmpFields.forEach(function (el) { el.style.display = method === 'snmp' ? '' : 'none'; });
+  function applyMethodVisibility(tr) {
+    var method = tr.querySelector('.f-method').value;
+    tr.querySelectorAll('.edit-val.f-ssh-only').forEach(function (el) {
+      el.style.display = method === 'ssh' ? '' : 'none';
+    });
+    tr.querySelectorAll('.edit-val.f-snmp-only').forEach(function (el) {
+      el.style.display = method === 'snmp' ? '' : 'none';
+    });
+  }
+
+  function setEditing(tr, editing) {
+    tr.classList.toggle('editing', editing);
+    tr.querySelectorAll('.view-val').forEach(function (el) { el.style.display = editing ? 'none' : ''; });
+    tr.querySelectorAll('.edit-val').forEach(function (el) { el.style.display = editing ? '' : 'none'; });
+    tr.querySelector('.row-edit-toggle').style.display = editing ? 'none' : '';
+    tr.querySelector('.row-save').style.display = editing ? '' : 'none';
+    tr.querySelector('.row-cancel').style.display = editing ? '' : 'none';
+    if (editing) {
+      applyMethodVisibility(tr);
+    } else {
+      var alertBox = tr.querySelector('.f-alert');
+      alertBox.style.display = 'none';
+    }
   }
 
   rows.forEach(function (tr) {
     var id = tr.dataset.id;
-    var editRow = document.getElementById('edit-row-' + id);
-    var methodSelect = editRow.querySelector('.f-method');
-    var platformSelect = editRow.querySelector('.f-platform');
-    var hint = editRow.querySelector('.f-hint');
+    var nameInput = tr.querySelector('.f-name');
+    var siteSelect = tr.querySelector('.f-site');
+    var deviceTypeSelect = tr.querySelector('.f-device-type');
+    var ipInput = tr.querySelector('.f-ip');
+    var platformSelect = tr.querySelector('.f-platform');
+    var methodSelect = tr.querySelector('.f-method');
+    var usernameInput = tr.querySelector('.f-username');
+    var passwordInput = tr.querySelector('.f-password');
+    var sshPortInput = tr.querySelector('.f-ssh-port');
+    var communityInput = tr.querySelector('.f-community');
+    var regionVal = tr.querySelector('.region-val');
+    var alertBox = tr.querySelector('.f-alert');
 
-    methodSelect.addEventListener('change', function () {
-      toggleMethodFields(editRow, methodSelect.value);
+    var original = {
+      name: nameInput.value,
+      site: siteSelect.value,
+      deviceType: deviceTypeSelect.value,
+      ip: ipInput.value,
+      platform: platformSelect.value,
+      method: methodSelect.value,
+      username: usernameInput.value,
+      sshPort: sshPortInput.value,
+      community: communityInput.value,
+      region: regionVal.textContent,
+    };
+
+    siteSelect.addEventListener('change', function () {
+      var opt = siteSelect.selectedOptions[0];
+      regionVal.textContent = (opt && opt.dataset.region) ? opt.dataset.region : '—';
     });
 
-    function openRow() {
-      // fecha qualquer outra linha aberta
-      document.querySelectorAll('.edit-row').forEach(function (er) {
-        if (er !== editRow) er.style.display = 'none';
-      });
-      document.querySelectorAll('.row-toggle i').forEach(function (icon) {
-        icon.className = 'ti ti-chevron-right';
-      });
+    methodSelect.addEventListener('change', function () {
+      applyMethodVisibility(tr);
+    });
 
-      var wasOpen = editRow.style.display !== 'none';
-      editRow.style.display = wasOpen ? 'none' : '';
-      var icon = tr.querySelector('.row-toggle i');
-      if (icon) icon.className = wasOpen ? 'ti ti-chevron-right' : 'ti ti-chevron-down';
+    function resetFields() {
+      nameInput.value = original.name;
+      siteSelect.value = original.site;
+      deviceTypeSelect.value = original.deviceType;
+      ipInput.value = original.ip;
+      platformSelect.value = original.platform;
+      methodSelect.value = original.method;
+      usernameInput.value = original.username;
+      passwordInput.value = '';
+      sshPortInput.value = original.sshPort;
+      communityInput.value = original.community;
+      regionVal.textContent = original.region;
+    }
 
-      if (!wasOpen && !methodSelect.value) {
-        var deviceTypeModel = editRow.dataset.deviceTypeModel || '';
-        var suggestion = suggestFor(tr.dataset.manufacturer, deviceTypeModel);
+    tr.querySelector('.row-edit-toggle').addEventListener('click', function () {
+      setEditing(tr, true);
+      if (!methodSelect.value) {
+        var suggestion = suggestFor(tr.dataset.manufacturer, tr.dataset.deviceTypeModel);
         if (suggestion) {
           methodSelect.value = suggestion.method;
-          toggleMethodFields(editRow, suggestion.method);
-          if (suggestion.platformSlug && platformSelect) {
+          applyMethodVisibility(tr);
+          if (suggestion.platformSlug) {
             var opt = platformSelect.querySelector('option[data-slug="' + suggestion.platformSlug + '"]');
             if (opt) platformSelect.value = opt.value;
           }
-          hint.textContent = suggestion.reason + ' Confira e ajuste se precisar.';
-          hint.style.display = '';
         }
       }
-    }
-
-    tr.querySelectorAll('.row-toggle').forEach(function (btn) {
-      btn.addEventListener('click', openRow);
-    });
-    editRow.querySelectorAll('.row-toggle').forEach(function (btn) {
-      btn.addEventListener('click', openRow);
     });
 
-    var saveBtn = editRow.querySelector('.f-save');
-    saveBtn.addEventListener('click', function () {
-      var alertBox = editRow.querySelector('.f-alert');
+    tr.querySelector('.row-cancel').addEventListener('click', function () {
+      resetFields();
+      setEditing(tr, false);
+    });
+
+    tr.querySelector('.row-save').addEventListener('click', function () {
+      var saveBtn = tr.querySelector('.row-save');
       var data = new URLSearchParams();
-      data.set('name', editRow.querySelector('.f-name').value.trim());
-      data.set('primary_ip', editRow.querySelector('.f-ip').value.trim());
+      data.set('name', nameInput.value.trim());
+      data.set('site_id', siteSelect.value);
+      data.set('device_type_id', deviceTypeSelect.value);
+      data.set('primary_ip', ipInput.value.trim());
+      data.set('platform_id', platformSelect.value);
       data.set('method', methodSelect.value);
-      if (platformSelect) data.set('platform_id', platformSelect.value);
-      var username = editRow.querySelector('.f-username');
-      var password = editRow.querySelector('.f-password');
-      var sshPort = editRow.querySelector('.f-ssh-port');
-      var community = editRow.querySelector('.f-community');
-      if (username) data.set('discovery_username', username.value.trim());
-      if (password) data.set('discovery_password', password.value);
-      if (sshPort) data.set('discovery_ssh_port', sshPort.value.trim());
-      if (community) data.set('discovery_snmp_community', community.value.trim());
+      data.set('discovery_username', usernameInput.value.trim());
+      data.set('discovery_password', passwordInput.value);
+      data.set('discovery_ssh_port', sshPortInput.value.trim());
+      data.set('discovery_snmp_community', communityInput.value.trim());
 
       saveBtn.disabled = true;
-      saveBtn.textContent = 'Salvando...';
+      alertBox.style.display = 'none';
 
       fetch('/device/' + id + '/inline-update', {
         method: 'POST',
@@ -368,19 +412,15 @@
           if (res.ok && res.body.ok) {
             window.location.reload();
           } else {
-            alertBox.textContent = 'Erro: ' + (res.body.error || 'falha desconhecida');
-            alertBox.className = 'col-12 f-alert alert alert-danger py-1 px-2 mb-0';
-            alertBox.style.display = '';
             saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="ti ti-device-floppy me-1"></i>Salvar';
+            alertBox.textContent = 'Erro: ' + (res.body.error || 'falha desconhecida');
+            alertBox.style.display = '';
           }
         })
         .catch(function (err) {
-          alertBox.textContent = 'Erro de rede: ' + err;
-          alertBox.className = 'col-12 f-alert alert alert-danger py-1 px-2 mb-0';
-          alertBox.style.display = '';
           saveBtn.disabled = false;
-          saveBtn.innerHTML = '<i class="ti ti-device-floppy me-1"></i>Salvar';
+          alertBox.textContent = 'Erro de rede: ' + err;
+          alertBox.style.display = '';
         });
     });
   });
