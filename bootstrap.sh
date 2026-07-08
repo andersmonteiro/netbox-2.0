@@ -476,6 +476,45 @@ log "7/$STEP_TOTAL Subindo a stack..."
 echo "    Stack no ar."
 
 # --------------------------------------------------------------------
+# Token real do superusuário: bug conhecido do netbox-docker (issue
+# netbox-community/netbox-docker#1647) -- a partir do NetBox 4.3
+# (tokens "v2"), o entrypoint cria o superusuário e um token, mas
+# IGNORA o valor de SUPERUSER_API_TOKEN e gera uma chave aleatória
+# própria. SUPERUSER_API_KEY não resolve isso (é um campo só proposto
+# nessa issue, ainda não implementado nesta versão do netbox-docker).
+# Por isso buscamos a chave de verdade direto no banco (com retry, a
+# migration/criação do superusuário pode não ter terminado ainda) e
+# corrigimos o .env e o NetBox Oracle pra usar o token que realmente
+# existe -- sem isso o NetBox Oracle recebe 403 "Invalid token".
+# --------------------------------------------------------------------
+log "Confirmando token real da API..."
+SUPERUSER_NAME_VAL="$(grep '^SUPERUSER_NAME=' "$ENV_FILE" | cut -d= -f2)"
+REAL_TOKEN=""
+for _tok_try in $(seq 1 20); do
+    RAW_TOK="$(cd "$REPO_DIR/netbox-docker" && docker compose exec -T netbox python3 /opt/netbox/netbox/manage.py shell -c "
+from users.models import Token
+t = Token.objects.filter(user__username='${SUPERUSER_NAME_VAL}').first()
+print('TOKENVALUE:' + (t.key if t else ''))
+" < /dev/null 2>/dev/null)"
+    REAL_TOKEN="$(echo "$RAW_TOK" | grep -oP 'TOKENVALUE:\K.*' | tr -d '[:space:]')"
+    if [ -n "$REAL_TOKEN" ]; then
+        break
+    fi
+    sleep 3
+done
+
+if [ -n "$REAL_TOKEN" ] && [ "$REAL_TOKEN" != "$FINAL_TOKEN" ]; then
+    echo "    Token gerado pelo NetBox é diferente do configurado -- corrigindo .env e reiniciando o NetBox Oracle."
+    sed -i "s|^SUPERUSER_API_TOKEN=.*|SUPERUSER_API_TOKEN=${REAL_TOKEN}|" "$ENV_FILE"
+    sed -i "s|^NETBOX_TOKEN=.*|NETBOX_TOKEN=${REAL_TOKEN}|" "$ENV_FILE"
+    sed -i "s|^DISCOVERY_UI_NETBOX_TOKEN=.*|DISCOVERY_UI_NETBOX_TOKEN=${REAL_TOKEN}|" "$ENV_FILE"
+    FINAL_TOKEN="$REAL_TOKEN"
+    (cd "$REPO_DIR/netbox-docker" && docker compose up -d discovery-ui < /dev/null) >/dev/null 2>&1 || true
+elif [ -z "$REAL_TOKEN" ]; then
+    warn "Não consegui confirmar o token real do superusuário -- se o NetBox Oracle mostrar erro 403 'Invalid token', confira manualmente: docker compose exec netbox python3 /opt/netbox/netbox/manage.py shell -c \"from users.models import Token; print(Token.objects.first().key)\""
+fi
+
+# --------------------------------------------------------------------
 # Chance de trocar a senha do superusuário -- só AGORA, com a stack
 # inteira já de pé (não trava mais o script no meio da instalação).
 # Só pergunta se a senha foi gerada automaticamente (se veio via
