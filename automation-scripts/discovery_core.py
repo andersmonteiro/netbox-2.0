@@ -146,21 +146,50 @@ def collect_snmp(device, community, timeout=5, retries=1, ssh_username=None, ssh
     looks_like_mikrotik = "routeros" in sys_descr or "mikrotik" in sys_descr
     if looks_like_mikrotik and ssh_username and ssh_password:
         try:
-            vlan_parents = collect_mikrotik_vlan_parents(host, ssh_username, ssh_password, port=ssh_port)
+            details = collect_mikrotik_interface_details(host, ssh_username, ssh_password, port=ssh_port)
             for iface in data["interfaces"]:
-                parent = vlan_parents.get(iface["name"])
-                if parent:
-                    iface["vlan_parent_from_device"] = parent
+                info = details.get(iface["name"])
+                if not info:
+                    continue
+                # O comment= do RouterOS é o campo que o operador realmente
+                # preenche no Winbox (ex: "SERVER-ANM2000") -- bem diferente
+                # do que o SNMP ifDescr retorna pra MikroTik, que é só o
+                # nome cru da porta repetido. Sobrescreve descr só quando
+                # tem comment de verdade (senão mantém o valor do SNMP).
+                if info.get("comment"):
+                    iface["descr"] = info["comment"]
+                if info.get("parent"):
+                    iface["vlan_parent_from_device"] = info["parent"]
         except Exception:
             pass  # best-effort -- ver comentário acima
 
     return data
 
 
-def collect_mikrotik_vlan_parents(host, username, password, port=None):
+def _ros_field(text, key):
+    """Extrai o valor de um campo 'key=valor' de uma saída de comando do
+    RouterOS -- aceita tanto valor sem aspas (ex: name=ether1, forma usada
+    quando o valor não tem espaço) quanto entre aspas (ex:
+    comment="SWITCH IBOPE", forma usada quando tem espaço/caractere
+    especial). Retorna None se o campo não aparecer no texto."""
+    m = re.search(rf'{key}="([^"]*)"', text)
+    if m:
+        return m.group(1)
+    m = re.search(rf"{key}=(\S+)", text)
+    if m:
+        return m.group(1)
+    return None
+
+
+def collect_mikrotik_interface_details(host, username, password, port=None):
     """Conecta via SSH (Netmiko) num MikroTik/RouterOS e lê
-    '/interface vlan print detail' pra descobrir a interface física real
-    de cada VLAN. Retorna {nome_da_vlan: nome_da_interface_pai}.
+    '/interface print detail' pra pegar, de cada interface: o comment=
+    (comentário configurado pelo operador, ex: "SERVER-ANM2000" -- é o que
+    aparece no Winbox acima de cada porta, bem diferente do que o SNMP
+    ifDescr retorna pra MikroTik) e, quando a interface for uma VLAN, o
+    interface= (a porta física real onde ela está, campo específico das
+    entradas tipo vlan). Retorna {nome_da_interface: {"comment": str|None,
+    "parent": str|None}}.
 
     Levanta exceção se netmiko não estiver instalado, a conexão falhar, ou
     nada for encontrado -- quem chama (collect_snmp) trata isso como
@@ -168,10 +197,11 @@ def collect_mikrotik_vlan_parents(host, username, password, port=None):
     ser silenciosa por conta própria.
 
     Nota: o parsing do "print detail" foi escrito a partir do formato
-    documentado do RouterOS (campos "name=" e "interface=" por item), mas
-    não foi testado contra um device real neste ambiente -- vale conferir
-    a saída de "/interface vlan print detail without-paging" no primeiro
-    device MikroTik real e ajustar o regex abaixo se o formato divergir.
+    documentado do RouterOS (campos "key=valor" por item, um item por
+    bloco iniciado por índice numérico), mas não foi testado contra um
+    device real neste ambiente -- vale conferir a saída de
+    "/interface print detail without-paging" no primeiro device MikroTik
+    real e ajustar o parsing acima (_ros_field) se o formato divergir.
     """
     from netmiko import ConnectHandler  # import tardio: só quem usar essa checagem extra precisa do netmiko
 
@@ -184,25 +214,28 @@ def collect_mikrotik_vlan_parents(host, username, password, port=None):
         timeout=10,
     )
     try:
-        output = conn.send_command("/interface vlan print detail without-paging")
+        output = conn.send_command("/interface print detail without-paging")
     finally:
         try:
             conn.disconnect()
         except Exception:
             pass
 
-    parents = {}
-    # Cada item do "print detail" tem name="vlanX" e interface=porta-fisica
-    # na mesma "linha lógica" (pode quebrar em várias linhas de terminal,
-    # por isso comparamos sobre o texto inteiro, item por item, usando o
-    # índice numérico no início de cada entrada como separador).
+    details = {}
+    # Cada item do "print detail" começa com um índice numérico (ex: " 0  R
+    # name=ether1 ...") e os campos daquele item podem quebrar em várias
+    # linhas de terminal -- por isso separamos o texto inteiro em blocos
+    # usando esse índice como marcador, em vez de linha por linha.
     entries = re.split(r"\n(?=\s*\d+\s)", output)
     for entry in entries:
-        name_match = re.search(r'name="([^"]+)"', entry)
-        iface_match = re.search(r"interface=(\S+)", entry)
-        if name_match and iface_match:
-            parents[name_match.group(1)] = iface_match.group(1)
-    return parents
+        name = _ros_field(entry, "name")
+        if not name:
+            continue
+        details[name] = {
+            "comment": _ros_field(entry, "comment"),
+            "parent": _ros_field(entry, "interface"),
+        }
+    return details
 
 
 # --------------------------------------------------------------------
@@ -594,7 +627,7 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
     username/password/ssh_port são gravados tanto pra method="ssh" (uso
     normal) quanto pra method="snmp" (uso opcional: credencial SSH extra
     só pra confirmar o vínculo VLAN -> porta física em devices MikroTik,
-    ver collect_snmp()/collect_mikrotik_vlan_parents() -- se o operador
+    ver collect_snmp()/collect_mikrotik_interface_details() -- se o operador
     não preencher nada aqui num device SNMP, esses campos continuam
     vazios e a coleta segue 100% via SNMP, sem essa checagem extra)."""
     cf = dict(device.custom_fields or {})
