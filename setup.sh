@@ -36,6 +36,14 @@ cp -r "$REPO_DIR/automation-scripts" "$NETBOX_DOCKER_DIR/"
 # de dentro de netbox-docker/) usa build.context: "." -- sem isso o
 # "COPY discovery-ui/..." do Dockerfile não acha os arquivos.
 cp -r "$REPO_DIR/discovery-ui" "$NETBOX_DOCKER_DIR/"
+# netbox-seed precisa estar aqui dentro pelo mesmo motivo: o volume
+# "./netbox-seed/devicetype-images:..." no docker-compose.override.yml é
+# um caminho relativo, resolvido a partir de onde o "docker compose" roda
+# (netbox-docker/), não a partir da raiz do template. Sem essa cópia o
+# Docker cria uma pasta vazia ali e monta ela vazia -- nenhuma imagem de
+# device type aparece.
+rm -rf "$NETBOX_DOCKER_DIR/netbox-seed"
+cp -r "$REPO_DIR/netbox-seed" "$NETBOX_DOCKER_DIR/"
 
 if [ ! -f "$NETBOX_DOCKER_DIR/.env" ]; then
     echo "==> Criando .env a partir de .env.example (edite antes de subir!)"
