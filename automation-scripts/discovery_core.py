@@ -166,42 +166,54 @@ def collect_snmp(device, community, timeout=5, retries=1, ssh_username=None, ssh
     return data
 
 
-def _ros_field(text, key):
-    """Extrai o valor de um campo 'key=valor' de uma saída de comando do
-    RouterOS -- aceita tanto valor sem aspas (ex: name=ether1, forma usada
-    quando o valor não tem espaço) quanto entre aspas (ex:
-    comment="SWITCH IBOPE", forma usada quando tem espaço/caractere
-    especial). Retorna None se o campo não aparecer no texto."""
-    m = re.search(rf'{key}="([^"]*)"', text)
+def _ros_split_entries(output):
+    """Cada item do "print terse" começa com um índice numérico no início
+    da linha (ex: " 0  R  comment=... name=..."). Normalmente é uma linha
+    só por item, mas separamos assim mesmo (em vez de linha por linha) pra
+    ficar resiliente a uma eventual quebra de linha do terminal no meio de
+    um item."""
+    return re.split(r"\n(?=\s*\d+\s)", output)
+
+
+def _ros_terse_value(text, key):
+    """Extrai o valor de um campo 'key=valor' de uma saída 'print terse'
+    do RouterOS -- confirmado contra device real (RouterOS 6.48.6). Nesse
+    formato os valores NÃO vêm entre aspas, então quando o valor tem
+    espaço (comentário livre do operador, ex: "SWITCH IBOPE", "CCR1072_
+    CGNAT - PORTA DE TESTES") o RouterOS não delimita de jeito nenhum --
+    a única forma de saber onde o valor termina é olhar onde começa o
+    próximo campo "algumacoisa=" reconhecível (ou o fim do bloco). O
+    lookbehind negativo evita casar por engano com um campo cujo nome
+    termina com "key" (ex: procurar "name=" não pode casar dentro de
+    "default-name=")."""
+    m = re.search(rf"(?<![\w-]){key}=(.*?)(?:\s+[a-zA-Z][\w-]*=|\s*$)", text, re.DOTALL)
     if m:
-        return m.group(1)
-    m = re.search(rf"{key}=(\S+)", text)
-    if m:
-        return m.group(1)
+        return m.group(1).strip()
     return None
 
 
 def collect_mikrotik_interface_details(host, username, password, port=None):
-    """Conecta via SSH (Netmiko) num MikroTik/RouterOS e lê
-    '/interface print detail' pra pegar, de cada interface: o comment=
-    (comentário configurado pelo operador, ex: "SERVER-ANM2000" -- é o que
-    aparece no Winbox acima de cada porta, bem diferente do que o SNMP
-    ifDescr retorna pra MikroTik) e, quando a interface for uma VLAN, o
-    interface= (a porta física real onde ela está, campo específico das
-    entradas tipo vlan). Retorna {nome_da_interface: {"comment": str|None,
-    "parent": str|None}}.
+    """Conecta via SSH (Netmiko) num MikroTik/RouterOS e lê duas saídas em
+    formato 'terse' (uma linha por interface -- mais simples e confiável
+    de parsear que 'print detail', que varia o formato do comentário
+    entre versões do RouterOS):
 
-    Levanta exceção se netmiko não estiver instalado, a conexão falhar, ou
-    nada for encontrado -- quem chama (collect_snmp) trata isso como
-    best-effort e ignora silenciosamente, então essa função não precisa
-    ser silenciosa por conta própria.
+    - '/interface print terse': confirmado contra device real -- traz
+      comment=<comentário livre do operador> (ex: "SERVER-ANM2000",
+      "SWITCH IBOPE" -- é o que aparece no Winbox acima de cada porta,
+      bem diferente do que o SNMP ifDescr retorna pra MikroTik) e
+      name=<nome>. Quando a interface não tem comentário definido, o
+      campo simplesmente não aparece na linha.
+    - '/interface vlan print terse': o "print terse" genérico acima NÃO
+      traz o vínculo VLAN -> porta física (campo "interface=") pras
+      entradas tipo vlan -- esse campo só aparece nessa consulta
+      específica de VLAN.
 
-    Nota: o parsing do "print detail" foi escrito a partir do formato
-    documentado do RouterOS (campos "key=valor" por item, um item por
-    bloco iniciado por índice numérico), mas não foi testado contra um
-    device real neste ambiente -- vale conferir a saída de
-    "/interface print detail without-paging" no primeiro device MikroTik
-    real e ajustar o parsing acima (_ros_field) se o formato divergir.
+    Retorna {nome_da_interface: {"comment": str|None, "parent": str|None}}.
+
+    Levanta exceção se netmiko não estiver instalado ou a conexão falhar
+    -- quem chama (collect_snmp) trata isso como best-effort e ignora
+    silenciosamente.
     """
     from netmiko import ConnectHandler  # import tardio: só quem usar essa checagem extra precisa do netmiko
 
@@ -214,7 +226,8 @@ def collect_mikrotik_interface_details(host, username, password, port=None):
         timeout=10,
     )
     try:
-        output = conn.send_command("/interface print detail without-paging")
+        output = conn.send_command("/interface print terse without-paging")
+        vlan_output = conn.send_command("/interface vlan print terse without-paging")
     finally:
         try:
             conn.disconnect()
@@ -222,19 +235,24 @@ def collect_mikrotik_interface_details(host, username, password, port=None):
             pass
 
     details = {}
-    # Cada item do "print detail" começa com um índice numérico (ex: " 0  R
-    # name=ether1 ...") e os campos daquele item podem quebrar em várias
-    # linhas de terminal -- por isso separamos o texto inteiro em blocos
-    # usando esse índice como marcador, em vez de linha por linha.
-    entries = re.split(r"\n(?=\s*\d+\s)", output)
-    for entry in entries:
-        name = _ros_field(entry, "name")
+    for entry in _ros_split_entries(output):
+        name = _ros_terse_value(entry, "name")
         if not name:
             continue
         details[name] = {
-            "comment": _ros_field(entry, "comment"),
-            "parent": _ros_field(entry, "interface"),
+            "comment": _ros_terse_value(entry, "comment"),
+            "parent": None,
         }
+
+    for entry in _ros_split_entries(vlan_output):
+        name = _ros_terse_value(entry, "name")
+        if not name:
+            continue
+        parent = _ros_terse_value(entry, "interface")
+        details.setdefault(name, {"comment": None, "parent": None})
+        if parent:
+            details[name]["parent"] = parent
+
     return details
 
 
