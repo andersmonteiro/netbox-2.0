@@ -300,6 +300,18 @@ if [ "$INSTALL_MODE" = "discovery-only" ]; then
         warn "Não consegui criar os custom fields de descoberta automaticamente -- detalhes em $CF_LOG. Rode manualmente depois (seção 2.4 do README)."
     fi
 
+    log "Criando Platforms padrão (drivers NAPALM) no NetBox..."
+    if (
+        cd "$REPO_DIR/automation-scripts"
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        NETBOX_URL="$NETBOX_URL" NETBOX_TOKEN="$NETBOX_TOKEN" python create_platforms.py
+    ) >> "$CF_LOG" 2>&1; then
+        echo "    Platforms prontas."
+    else
+        warn "Não consegui criar as Platforms padrão automaticamente -- detalhes em $CF_LOG."
+    fi
+
     SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
     cat <<EOF
 
@@ -562,6 +574,23 @@ if (
     echo "    Custom fields prontos."
 else
     warn "Não consegui criar os custom fields de descoberta automaticamente -- detalhes em $REPO_DIR/netbox-docker/discovery-fields.log. Rode manualmente depois (seção 2.4 do README): cd $REPO_DIR/automation-scripts && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && NETBOX_URL=http://localhost:8000 NETBOX_TOKEN=<token> python create_discovery_fields.py"
+fi
+
+# --------------------------------------------------------------------
+# Platforms padrão (drivers NAPALM) -- sem isso o dropdown de Platform
+# no NetBox Oracle fica vazio e a descoberta via SSH não tem como saber
+# qual driver usar. Mesmo venv já preparado no passo anterior.
+# --------------------------------------------------------------------
+log "Criando Platforms padrão (drivers NAPALM) no NetBox..."
+if (
+    cd "$REPO_DIR/automation-scripts"
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    NETBOX_URL="http://localhost:8000" NETBOX_TOKEN="$FINAL_TOKEN" python create_platforms.py
+) >> "$REPO_DIR/netbox-docker/discovery-fields.log" 2>&1; then
+    echo "    Platforms prontas."
+else
+    warn "Não consegui criar as Platforms padrão automaticamente -- detalhes em $REPO_DIR/netbox-docker/discovery-fields.log. Rode manualmente depois: cd $REPO_DIR/automation-scripts && source .venv/bin/activate && NETBOX_URL=http://localhost:8000 NETBOX_TOKEN=<token> python create_platforms.py"
 fi
 
 # --------------------------------------------------------------------

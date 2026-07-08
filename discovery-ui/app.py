@@ -218,6 +218,11 @@ def dashboard():
         flash(f"Erro ao consultar o NetBox: {exc}", "error")
         devices = []
 
+    try:
+        platforms = list(nb.dcim.platforms.all())
+    except Exception:
+        platforms = []
+
     rows = []
     for d in devices:
         cf = d.custom_fields or {}
@@ -231,22 +236,30 @@ def dashboard():
         except Exception:
             region = ""
         manufacturer = ""
+        device_type_model = ""
         try:
-            if d.device_type and getattr(d.device_type, "manufacturer", None):
-                manufacturer = str(d.device_type.manufacturer)
+            if d.device_type:
+                device_type_model = str(d.device_type)
+                if getattr(d.device_type, "manufacturer", None):
+                    manufacturer = str(d.device_type.manufacturer)
         except Exception:
-            manufacturer = ""
+            pass
         rows.append({
             "id": d.id,
             "name": d.name,
             "site": site,
             "region": region,
             "manufacturer": manufacturer,
+            "device_type_model": device_type_model,
             "primary_ip": str(d.primary_ip4).split("/")[0] if d.primary_ip4 else None,
             "platform": str(d.platform) if d.platform else None,
+            "platform_id": d.platform.id if d.platform else None,
             "method": method,
             "has_cred": has_cred,
             "ready": bool(method and has_cred and d.primary_ip4 and (method != "ssh" or d.platform)),
+            "cf_username": cf.get("discovery_username") or "",
+            "cf_ssh_port": cf.get("discovery_ssh_port") or "",
+            "cf_snmp_community": cf.get("discovery_snmp_community") or "",
         })
 
     pending_count = len(list(OUTPUT_DIR.glob("*.json"))) if OUTPUT_DIR.exists() else 0
@@ -256,7 +269,7 @@ def dashboard():
     filter_manufacturers = sorted({r["manufacturer"] for r in rows if r["manufacturer"]})
 
     return render_template(
-        "dashboard.html", rows=rows, pending_count=pending_count,
+        "dashboard.html", rows=rows, pending_count=pending_count, platforms=platforms,
         filter_sites=filter_sites, filter_regions=filter_regions, filter_manufacturers=filter_manufacturers,
     )
 
@@ -348,9 +361,29 @@ def device_edit(device_id):
     )
 
 
+@app.route("/device/<int:device_id>/inline-update", methods=["POST"])
+@login_required
+def device_inline_update(device_id):
+    """Endpoint AJAX usado pela linha expansível do dashboard -- aplica
+    nome/platform/IP/credenciais de descoberta sem sair da página."""
+    try:
+        nb = get_nb()
+        device = nb.dcim.devices.get(device_id)
+        if not device:
+            return {"ok": False, "error": "Device não encontrado."}, 404
+        _apply_discovery_form(nb, device, request.form)
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}, 400
+
+
 def _apply_discovery_form(nb, device, form):
     """Lê os campos comuns ao formulário de novo/editar device e grava
-    Platform, Primary IP e os custom fields de descoberta."""
+    Nome, Platform, Primary IP e os custom fields de descoberta."""
+    new_name = form.get("name", "").strip()
+    if new_name and new_name != device.name:
+        device.update({"name": new_name})
+
     platform_id = form.get("platform_id")
     if platform_id:
         device.update({"platform": int(platform_id)})
@@ -366,6 +399,7 @@ def _apply_discovery_form(nb, device, form):
             discovery_username=form.get("discovery_username") or None,
             discovery_password=form.get("discovery_password") or None,
             discovery_snmp_community=form.get("discovery_snmp_community") or None,
+            discovery_ssh_port=form.get("discovery_ssh_port") or None,
         )
 
 

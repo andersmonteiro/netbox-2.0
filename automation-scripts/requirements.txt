@@ -2,5 +2,11 @@ pynetbox>=7.4,<8
 pandas>=2.2
 openpyxl>=3.1
 napalm>=5.0
+# Driver comunitário -- "huawei_vrp" não vem embutido no napalm core (só
+# eos/ios/iosxr/junos/nxos/nxos_ssh/panos vêm), mas boa parte do catálogo
+# de device types deste projeto é Huawei (NE8000 etc.), então instalamos
+# à parte. napalm.get_network_driver() importa isso automaticamente
+# quando o Platform.slug do device é "huawei_vrp".
+napalm-huawei-vrp>=1.0
 netmiko>=4.3
 python-dotenv>=1.0

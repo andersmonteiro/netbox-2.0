@@ -58,6 +58,12 @@ FIELDS = {
         "description": "Senha de SSH, usado quando 'Descoberta: método' = SSH. Texto plano -- ver aviso de segurança no script create_discovery_fields.py.",
         "weight": 120,
     },
+    "discovery_ssh_port": {
+        "type": "integer",
+        "label": "Descoberta: porta SSH",
+        "description": "Porta SSH, usado quando 'Descoberta: método' = SSH. Deixe em branco pra usar a porta padrão (22).",
+        "weight": 125,
+    },
     "discovery_snmp_community": {
         "type": "text",
         "label": "Descoberta: community (SNMP)",

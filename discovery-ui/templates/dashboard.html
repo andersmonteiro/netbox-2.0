@@ -59,12 +59,13 @@
 
 <div class="card">
   {% if rows %}
-  <form method="post" action="{{ url_for('discover') }}">
+  <form method="post" action="{{ url_for('discover') }}" id="discover-form">
     <div class="table-responsive">
       <table class="table table-vcenter card-table" id="devices-table">
         <thead>
           <tr>
             <th class="w-1"><input type="checkbox" class="form-check-input m-0" id="select-all-cb"></th>
+            <th class="w-1"></th>
             <th>Nome</th>
             <th>Site</th>
             <th>Região</th>
@@ -73,12 +74,13 @@
             <th>Platform</th>
             <th>Método</th>
             <th>Status</th>
-            <th class="w-1"></th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
           <tr
+            class="dev-row"
+            data-id="{{ r.id }}"
             data-name="{{ r.name|lower }}"
             data-ip="{{ (r.primary_ip or '')|lower }}"
             data-site="{{ r.site }}"
@@ -88,8 +90,13 @@
             <td>
               <input
                 type="checkbox" class="form-check-input m-0 dev-cb" name="device_ids" value="{{ r.id }}"
-                {% if not r.ready %}disabled title="Configure o método de descoberta antes (clique no lápis pra editar)"{% endif %}
+                {% if not r.ready %}disabled title="Configure o método de descoberta antes (clique na seta pra editar)"{% endif %}
               >
+            </td>
+            <td>
+              <button type="button" class="btn btn-icon btn-sm btn-ghost-secondary row-toggle" data-id="{{ r.id }}" title="editar">
+                <i class="ti ti-chevron-right"></i>
+              </button>
             </td>
             <td class="fw-medium">{{ r.name }}</td>
             <td class="text-secondary">{{ r.site or "—" }}</td>
@@ -107,7 +114,65 @@
                 <span class="badge bg-red-lt"><i class="ti ti-circle-x me-1"></i>incompleto</span>
               {% endif %}
             </td>
-            <td><a class="text-secondary" href="{{ url_for('device_edit', device_id=r.id) }}" title="editar"><i class="ti ti-edit"></i></a></td>
+          </tr>
+          <tr class="edit-row" id="edit-row-{{ r.id }}" data-device-type-model="{{ r.device_type_model }}" style="display:none">
+            <td colspan="10" class="bg-body-tertiary">
+              <div class="row g-3 py-2">
+                <div class="col-md-3">
+                  <label class="form-label mb-1">Nome</label>
+                  <input type="text" class="form-control form-control-sm f-name" value="{{ r.name }}">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label mb-1">IP de gerência</label>
+                  <input type="text" class="form-control form-control-sm f-ip" value="{{ r.primary_ip or '' }}" placeholder="ex: 10.0.0.1">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label mb-1">Método de descoberta</label>
+                  <select class="form-select form-select-sm f-method">
+                    <option value="">— selecione —</option>
+                    <option value="ssh" {% if r.method == 'ssh' %}selected{% endif %}>SSH (NAPALM)</option>
+                    <option value="snmp" {% if r.method == 'snmp' %}selected{% endif %}>SNMP</option>
+                  </select>
+                </div>
+                <div class="col-md-3 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
+                  <label class="form-label mb-1">Platform</label>
+                  <select class="form-select form-select-sm f-platform">
+                    <option value="">— selecione —</option>
+                    {% for p in platforms %}
+                    <option value="{{ p.id }}" data-slug="{{ p.slug }}" {% if r.platform_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+
+                <div class="col-md-3 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
+                  <label class="form-label mb-1">Usuário (SSH)</label>
+                  <input type="text" class="form-control form-control-sm f-username" value="{{ r.cf_username }}" autocomplete="off">
+                </div>
+                <div class="col-md-3 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
+                  <label class="form-label mb-1">Senha (SSH)</label>
+                  <input type="password" class="form-control form-control-sm f-password" placeholder="deixe em branco pra manter" autocomplete="new-password">
+                </div>
+                <div class="col-md-2 f-ssh-fields" style="{% if r.method != 'ssh' %}display:none{% endif %}">
+                  <label class="form-label mb-1">Porta SSH</label>
+                  <input type="number" class="form-control form-control-sm f-ssh-port" value="{{ r.cf_ssh_port }}" placeholder="22">
+                </div>
+                <div class="col-md-3 f-snmp-fields" style="{% if r.method != 'snmp' %}display:none{% endif %}">
+                  <label class="form-label mb-1">Community (SNMP)</label>
+                  <input type="text" class="form-control form-control-sm f-community" value="{{ r.cf_snmp_community }}" autocomplete="off">
+                </div>
+
+                <div class="col-12 f-hint text-secondary small" style="display:none"></div>
+
+                <div class="col-12 f-alert" style="display:none"></div>
+
+                <div class="col-12">
+                  <button type="button" class="btn btn-primary btn-sm f-save" data-id="{{ r.id }}">
+                    <i class="ti ti-device-floppy me-1"></i>Salvar
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm row-toggle" data-id="{{ r.id }}">Cancelar</button>
+                </div>
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -131,7 +196,7 @@
 <script>
 (function () {
   var table = document.getElementById('devices-table');
-  var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+  var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr.dev-row'));
   var search = document.getElementById('f-search');
   var fSite = document.getElementById('f-site');
   var fRegion = document.getElementById('f-region');
@@ -151,6 +216,8 @@
         (!region || tr.dataset.region === region) &&
         (!manufacturer || tr.dataset.manufacturer === manufacturer);
       tr.style.display = matches ? '' : 'none';
+      var editRow = document.getElementById('edit-row-' + tr.dataset.id);
+      if (editRow && !matches) editRow.style.display = 'none';
     });
   }
 
@@ -171,6 +238,150 @@
       if (tr.style.display === 'none') return;
       var cb = tr.querySelector('.dev-cb:not(:disabled)');
       if (cb) cb.checked = selectAll.checked;
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // Edição inline (linha expansível)
+  // ------------------------------------------------------------------
+
+  // Heurística fabricante -> método/plataforma sugeridos. Baseado na
+  // cobertura real de drivers NAPALM: só sugerimos SSH pra fabricantes
+  // com driver disponível: Cisco, Juniper, Arista, Palo Alto e Huawei
+  // (linha roteador/switch, driver comunitário huawei_vrp). OLTs Huawei
+  // usam outra linha de produto (sem driver NAPALM), por isso o caso
+  // Huawei checa o modelo do device type em busca de "OLT" antes de
+  // sugerir SSH -- se parecer uma OLT, sugerimos SNMP em vez disso.
+  // Os demais (MikroTik, Datacom, e todas as OLTs de outras marcas) não
+  // têm driver NAPALM nenhum, então a única opção viável é SNMP.
+  var MANUFACTURER_RULES = [
+    { match: /cisco/i, method: 'ssh', platformSlug: 'ios' },
+    { match: /juniper/i, method: 'ssh', platformSlug: 'junos' },
+    { match: /arista/i, method: 'ssh', platformSlug: 'eos' },
+    { match: /palo\s*alto/i, method: 'ssh', platformSlug: 'panos' },
+    { match: /huawei/i, method: 'ssh', platformSlug: 'huawei_vrp', oltCheck: true },
+    { match: /mikrotik/i, method: 'snmp' },
+    { match: /datacom/i, method: 'snmp' },
+    { match: /zte/i, method: 'snmp' },
+    { match: /parks/i, method: 'snmp' },
+    { match: /fiberhome/i, method: 'snmp' },
+    { match: /vsol/i, method: 'snmp' },
+    { match: /intelbras/i, method: 'snmp' },
+  ];
+  var OLT_PATTERN = /\bolt\b|ma5\d{3}/i;
+
+  function suggestFor(manufacturer, deviceTypeModel) {
+    for (var i = 0; i < MANUFACTURER_RULES.length; i++) {
+      var rule = MANUFACTURER_RULES[i];
+      if (rule.match.test(manufacturer || '')) {
+        if (rule.oltCheck && OLT_PATTERN.test(deviceTypeModel || '')) {
+          return { method: 'snmp', platformSlug: null, reason: 'Huawei OLT não tem driver NAPALM -- sugerindo SNMP.' };
+        }
+        return { method: rule.method, platformSlug: rule.platformSlug || null, reason: 'Sugestão baseada no fabricante (' + manufacturer + ').' };
+      }
+    }
+    return null;
+  }
+
+  function toggleMethodFields(editRow, method) {
+    var sshFields = editRow.querySelectorAll('.f-ssh-fields');
+    var snmpFields = editRow.querySelectorAll('.f-snmp-fields');
+    sshFields.forEach(function (el) { el.style.display = method === 'ssh' ? '' : 'none'; });
+    snmpFields.forEach(function (el) { el.style.display = method === 'snmp' ? '' : 'none'; });
+  }
+
+  rows.forEach(function (tr) {
+    var id = tr.dataset.id;
+    var editRow = document.getElementById('edit-row-' + id);
+    var methodSelect = editRow.querySelector('.f-method');
+    var platformSelect = editRow.querySelector('.f-platform');
+    var hint = editRow.querySelector('.f-hint');
+
+    methodSelect.addEventListener('change', function () {
+      toggleMethodFields(editRow, methodSelect.value);
+    });
+
+    function openRow() {
+      // fecha qualquer outra linha aberta
+      document.querySelectorAll('.edit-row').forEach(function (er) {
+        if (er !== editRow) er.style.display = 'none';
+      });
+      document.querySelectorAll('.row-toggle i').forEach(function (icon) {
+        icon.className = 'ti ti-chevron-right';
+      });
+
+      var wasOpen = editRow.style.display !== 'none';
+      editRow.style.display = wasOpen ? 'none' : '';
+      var icon = tr.querySelector('.row-toggle i');
+      if (icon) icon.className = wasOpen ? 'ti ti-chevron-right' : 'ti ti-chevron-down';
+
+      if (!wasOpen && !methodSelect.value) {
+        var deviceTypeModel = editRow.dataset.deviceTypeModel || '';
+        var suggestion = suggestFor(tr.dataset.manufacturer, deviceTypeModel);
+        if (suggestion) {
+          methodSelect.value = suggestion.method;
+          toggleMethodFields(editRow, suggestion.method);
+          if (suggestion.platformSlug && platformSelect) {
+            var opt = platformSelect.querySelector('option[data-slug="' + suggestion.platformSlug + '"]');
+            if (opt) platformSelect.value = opt.value;
+          }
+          hint.textContent = suggestion.reason + ' Confira e ajuste se precisar.';
+          hint.style.display = '';
+        }
+      }
+    }
+
+    tr.querySelectorAll('.row-toggle').forEach(function (btn) {
+      btn.addEventListener('click', openRow);
+    });
+    editRow.querySelectorAll('.row-toggle').forEach(function (btn) {
+      btn.addEventListener('click', openRow);
+    });
+
+    var saveBtn = editRow.querySelector('.f-save');
+    saveBtn.addEventListener('click', function () {
+      var alertBox = editRow.querySelector('.f-alert');
+      var data = new URLSearchParams();
+      data.set('name', editRow.querySelector('.f-name').value.trim());
+      data.set('primary_ip', editRow.querySelector('.f-ip').value.trim());
+      data.set('method', methodSelect.value);
+      if (platformSelect) data.set('platform_id', platformSelect.value);
+      var username = editRow.querySelector('.f-username');
+      var password = editRow.querySelector('.f-password');
+      var sshPort = editRow.querySelector('.f-ssh-port');
+      var community = editRow.querySelector('.f-community');
+      if (username) data.set('discovery_username', username.value.trim());
+      if (password) data.set('discovery_password', password.value);
+      if (sshPort) data.set('discovery_ssh_port', sshPort.value.trim());
+      if (community) data.set('discovery_snmp_community', community.value.trim());
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Salvando...';
+
+      fetch('/device/' + id + '/inline-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: data.toString(),
+      })
+        .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, body: j }; }); })
+        .then(function (res) {
+          if (res.ok && res.body.ok) {
+            window.location.reload();
+          } else {
+            alertBox.textContent = 'Erro: ' + (res.body.error || 'falha desconhecida');
+            alertBox.className = 'col-12 f-alert alert alert-danger py-1 px-2 mb-0';
+            alertBox.style.display = '';
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="ti ti-device-floppy me-1"></i>Salvar';
+          }
+        })
+        .catch(function (err) {
+          alertBox.textContent = 'Erro de rede: ' + err;
+          alertBox.className = 'col-12 f-alert alert alert-danger py-1 px-2 mb-0';
+          alertBox.style.display = '';
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="ti ti-device-floppy me-1"></i>Salvar';
+        });
     });
   });
 })();

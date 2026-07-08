@@ -135,7 +135,7 @@ def collect_snmp(device, community, timeout=5, retries=1):
 # SSH / NAPALM
 # --------------------------------------------------------------------
 
-def collect_ssh(device, username, password):
+def collect_ssh(device, username, password, port=None):
     from napalm import get_network_driver  # import tardio: só quem usar SSH precisa do napalm
 
     if not device.platform:
@@ -153,7 +153,14 @@ def collect_ssh(device, username, password):
         data["errors"].append(f"driver NAPALM '{driver_name}' inválido: {exc}")
         return data
 
-    conn = driver(hostname=host, username=username, password=password)
+    optional_args = {}
+    if port:
+        try:
+            optional_args["port"] = int(port)
+        except (TypeError, ValueError):
+            pass
+
+    conn = driver(hostname=host, username=username, password=password, optional_args=optional_args or None)
     try:
         conn.open()
         facts = conn.get_facts()
@@ -189,9 +196,10 @@ def collect_device(device, method, credentials, snmp_timeout=5, snmp_retries=1):
     if method == "ssh":
         username = credentials.get("discovery_username")
         password = credentials.get("discovery_password")
+        port = credentials.get("discovery_ssh_port")
         if not username or not password:
             return {"method": "ssh", "errors": ["falta usuário/senha"]}
-        return collect_ssh(device, username, password)
+        return collect_ssh(device, username, password, port=port)
     elif method == "snmp":
         community = credentials.get("discovery_snmp_community")
         if not community:
@@ -373,7 +381,7 @@ def set_primary_ip(nb, device, ip_str):
     return ip_obj
 
 
-def set_discovery_fields(device, method, discovery_username=None, discovery_password=None, discovery_snmp_community=None):
+def set_discovery_fields(device, method, discovery_username=None, discovery_password=None, discovery_snmp_community=None, discovery_ssh_port=None):
     """Grava discovery_method + a credencial correspondente nos custom
     fields do device (mesmos campos criados por create_discovery_fields.py)."""
     cf = dict(device.custom_fields or {})
@@ -383,6 +391,8 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
             cf["discovery_username"] = discovery_username
         if discovery_password is not None:
             cf["discovery_password"] = discovery_password
+        if discovery_ssh_port is not None:
+            cf["discovery_ssh_port"] = discovery_ssh_port
     elif method == "snmp":
         if discovery_snmp_community is not None:
             cf["discovery_snmp_community"] = discovery_snmp_community
