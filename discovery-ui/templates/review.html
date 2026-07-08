@@ -16,10 +16,22 @@
 
 {% for item in items %}
 <div class="card mb-3">
-  <div class="card-header">
-    <h3 class="card-title">{{ item.data.device_name }} <span class="badge bg-teal-lt badge-method ms-2">{{ "SSH + SNMP" if item.data.method == "both" else item.data.method|upper }}</span></h3>
+  <div
+    class="card-header"
+    style="cursor: pointer;"
+    data-bs-toggle="collapse"
+    data-bs-target="#dev-collapse-{{ loop.index }}"
+    role="button"
+    aria-expanded="true"
+    aria-controls="dev-collapse-{{ loop.index }}"
+  >
+    <h3 class="card-title">
+      <i class="ti ti-chevron-down me-1 review-chevron"></i>
+      {{ item.data.device_name }} <span class="badge bg-teal-lt badge-method ms-2">{{ "SSH + SNMP" if item.data.method == "both" else item.data.method|upper }}</span>
+    </h3>
     <div class="card-actions text-secondary">{{ item.n_interfaces }} interface(s), {{ item.n_up }} up</div>
   </div>
+  <div class="collapse show" id="dev-collapse-{{ loop.index }}">
   <div class="card-body">
     {% if item.data.sys_name %}<div class="text-secondary">sys_name: {{ item.data.sys_name }}</div>{% endif %}
     {% if item.data.serial %}<div class="text-secondary mb-2">serial: {{ item.data.serial }}</div>{% endif %}
@@ -94,6 +106,16 @@
       <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="ti ti-trash me-1"></i>Descartar</button>
     </form>
   </div>
+  </div>
 </div>
 {% endfor %}
+
+{% if items %}
+<style>
+  /* Chevron gira quando o card recolhe -- Bootstrap alterna aria-expanded
+     no próprio card-header (o elemento com data-bs-toggle="collapse"). */
+  .card-header[aria-expanded="false"] .review-chevron { transform: rotate(-90deg); }
+  .review-chevron { display: inline-block; transition: transform 0.15s ease; }
+</style>
+{% endif %}
 {% endblock %}

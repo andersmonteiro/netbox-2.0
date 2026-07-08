@@ -564,20 +564,39 @@ INTERFACE_TYPE_CHOICES = [
 
 def guess_interface_type(name):
     """Chute do tipo NetBox a partir do nome da interface descoberta.
-    Best-effort -- sempre revisável na tela de revisão antes de gravar."""
+    Best-effort -- sempre revisável na tela de revisão antes de gravar.
+
+    Cobre tanto a nomenclatura Cisco-like (GigabitEthernet, TenGigabitEthernet,
+    Port-channel...) quanto a nomenclatura Huawei VRP, confirmada contra
+    device real: "Eth-Trunk" (LAG, mas tratado como Virtual -- ver
+    comentário abaixo), "XGigabitEthernet" (10GE/SFP+ -- NÃO confundir com
+    GigabitEthernet comum, o "X" na frente muda tudo), "100GE"/"40GE"
+    (QSFP28/QSFP+), "InLoopBack" (variação de nome do loopback)."""
     n = (name or "").strip().lower()
     if not n:
         return "other"
-    if n.startswith(("vlan", "vl", "loopback", "lo", "eoip", "tunnel", "gre")):
+    # "Eth-Trunk" do Huawei é tecnicamente um LAG (agregação), mas por
+    # pedido explícito do cliente é tratado como Virtual aqui -- se quiser
+    # o tipo "lag" de verdade (com o agrupamento de portas físicas que o
+    # NetBox faz pra LAG), troca esse "virtual" por "lag" nessa linha.
+    if n.startswith(("vlan", "vl", "eoip", "tunnel", "gre", "eth-trunk")) or "loopback" in n:
         return "virtual"
     if n.startswith("bridge") or n == "br" or n.startswith("br-"):
         return "bridge"
     if n.startswith(("port-channel", "portchannel", "po", "lag", "bond")):
         return "lag"
-    if "sfpplus" in n or "sfp-plus" in n or n.startswith(("te", "xe")) or "tengig" in n:
-        return "10gbase-x-sfpp"
-    if n.startswith("qsfp") or "40gb" in n or "100gb" in n:
+    # 100G/40G verificado ANTES de 10G -- Huawei "100GE0/0/1" não pode
+    # cair na regra de 10G por engano.
+    if n.startswith(("100ge", "100gb")) or "100gbase" in n:
+        return "100gbase-x-qsfp28"
+    if n.startswith(("qsfp", "40ge", "40gb")) or "40gbase" in n:
         return "40gbase-x-qsfpp"
+    if (
+        "sfpplus" in n or "sfp-plus" in n
+        or n.startswith(("te", "xe", "xgigabitethernet", "xge", "10ge"))
+        or "tengig" in n
+    ):
+        return "10gbase-x-sfpp"
     if "sfp" in n:
         return "1000base-x-sfp"
     if n.startswith("fa") or "fastethernet" in n:
