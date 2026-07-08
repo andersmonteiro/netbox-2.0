@@ -270,16 +270,80 @@ def normalize_ifname(name):
 # --------------------------------------------------------------------
 # apply -- grava o resultado de uma coleta (já revisado) no NetBox
 # --------------------------------------------------------------------
+# Tipo de interface (campo "type" do NetBox) -- a descoberta (SNMP ou
+# SSH/NAPALM) não traz esse dado de forma confiável, então tentamos
+# adivinhar a partir do NOME da interface (mesma ideia de
+# normalize_ifname acima) e deixamos o operador confirmar/trocar na
+# tela de revisão antes de gravar. Sem isso, toda interface nova
+# entrava no NetBox como "Other", que é o catch-all genérico e não
+# aparece com o ícone/rótulo certo (ex: "SFP+ (10GE)", "1000BASE-T
+# (1GE)") como as interfaces cadastradas manualmente.
+# Lista enxuta com os slugs mais comuns -- cobre a maioria dos
+# vendors deste projeto (Cisco/Huawei/MikroTik/Juniper/Arista).
+# Referência: NetBox InterfaceTypeChoices (dcim/choices.py).
+# --------------------------------------------------------------------
+INTERFACE_TYPE_CHOICES = [
+    ("virtual", "Virtual"),
+    ("bridge", "Bridge"),
+    ("lag", "Link Aggregation Group (LAG)"),
+    ("100base-tx", "100BASE-TX (10/100ME)"),
+    ("1000base-t", "1000BASE-T (1GE)"),
+    ("2.5gbase-t", "2.5GBASE-T (2.5GE)"),
+    ("5gbase-t", "5GBASE-T (5GE)"),
+    ("10gbase-t", "10GBASE-T (10GE)"),
+    ("1000base-x-sfp", "SFP (1GE)"),
+    ("10gbase-x-sfpp", "SFP+ (10GE)"),
+    ("25gbase-x-sfp28", "SFP28 (25GE)"),
+    ("40gbase-x-qsfpp", "QSFP+ (40GE)"),
+    ("100gbase-x-qsfp28", "QSFP28 (100GE)"),
+    ("other", "Other"),
+]
+
+
+def guess_interface_type(name):
+    """Chute do tipo NetBox a partir do nome da interface descoberta.
+    Best-effort -- sempre revisável na tela de revisão antes de gravar."""
+    n = (name or "").strip().lower()
+    if not n:
+        return "other"
+    if n.startswith(("vlan", "vl", "loopback", "lo", "eoip", "tunnel", "gre")):
+        return "virtual"
+    if n.startswith("bridge") or n == "br" or n.startswith("br-"):
+        return "bridge"
+    if n.startswith(("port-channel", "portchannel", "po", "lag", "bond")):
+        return "lag"
+    if "sfpplus" in n or "sfp-plus" in n or n.startswith(("te", "xe")) or "tengig" in n:
+        return "10gbase-x-sfpp"
+    if n.startswith("qsfp") or "40gb" in n or "100gb" in n:
+        return "40gbase-x-qsfpp"
+    if "sfp" in n:
+        return "1000base-x-sfp"
+    if n.startswith("fa") or "fastethernet" in n:
+        return "100base-tx"
+    if n.startswith(("ether", "gi", "ge", "eth")) or "gigabitethernet" in n:
+        return "1000base-t"
+    return "other"
+
+
+def is_vlan_ifname(name):
+    """True se o nome parece uma interface de VLAN (sub-interface lógica
+    que faz sentido vincular a uma porta física na revisão)."""
+    n = (name or "").strip().lower()
+    return n.startswith("vlan") or n.startswith("vl")
+
 
 def apply_device_result(nb, device, data, interface_filter=None):
     """Aplica um resultado de coleta (dict, mesmo formato salvo em JSON
     pelo CLI) num Device já carregado do pynetbox.
 
     interface_filter: dict opcional {nome_da_interface: {"include": bool,
-    "description": str}} -- usado pela interface web pra permitir marcar
-    quais interfaces entram e editar a descrição antes de aplicar. Se
-    None, aplica todas as interfaces descobertas como vieram (comportamento
-    do CLI).
+    "description": str, "type": str|None, "parent_name": str|None}} --
+    usado pela interface web pra permitir marcar quais interfaces
+    entram, editar a descrição, confirmar o tipo (ver
+    guess_interface_type) e -- pra interfaces de VLAN -- vincular à
+    porta física correspondente (campo "parent" do NetBox) antes de
+    aplicar. Se None, aplica todas as interfaces descobertas como
+    vieram, sem tipo nem vínculo (comportamento do CLI).
 
     Retorna a lista de strings descrevendo o que mudou (changes).
     """
@@ -293,17 +357,23 @@ def apply_device_result(nb, device, data, interface_filter=None):
     existing_if = list(nb.dcim.interfaces.filter(device_id=device.id))
     existing_by_norm = {normalize_ifname(i.name): i for i in existing_if}
     created, updated, matched_norm = 0, 0, 0
+    processed_by_name = {}  # nome descoberto -> objeto pynetbox da interface (nova ou já existente)
+    pending_parents = []  # [(nome_da_vlan, nome_da_interface_pai)]
 
     for iface in data.get("interfaces", []):
         name = iface.get("name")
         if not name:
             continue
 
+        iface_type = None
+        parent_name = None
         if interface_filter is not None:
             entry = interface_filter.get(name)
             if not entry or not entry.get("include", True):
                 continue
             description = entry.get("description", iface.get("descr") or "")
+            iface_type = entry.get("type") or None
+            parent_name = entry.get("parent_name") or None
         else:
             description = iface.get("descr") or ""
 
@@ -312,15 +382,22 @@ def apply_device_result(nb, device, data, interface_filter=None):
         if nb_if:
             if nb_if.name != name:
                 matched_norm += 1
-            if nb_if.enabled != enabled or (description and nb_if.description != description):
-                nb_if.update({"enabled": enabled, "description": description or nb_if.description})
+            update_payload = {}
+            if nb_if.enabled != enabled:
+                update_payload["enabled"] = enabled
+            if description and nb_if.description != description:
+                update_payload["description"] = description
+            if iface_type:
+                update_payload["type"] = iface_type
+            if update_payload:
+                nb_if.update(update_payload)
                 updated += 1
         else:
-            nb.dcim.interfaces.create(
+            nb_if = nb.dcim.interfaces.create(
                 {
                     "device": device.id,
                     "name": name,
-                    "type": "other",
+                    "type": iface_type or "other",
                     "enabled": enabled,
                     "description": description,
                     "mac_address": iface.get("mac_address") or None,
@@ -328,12 +405,29 @@ def apply_device_result(nb, device, data, interface_filter=None):
             )
             created += 1
 
+        processed_by_name[name] = nb_if
+        if parent_name:
+            pending_parents.append((name, parent_name))
+
+    # Segunda passada: só agora todas as interfaces do lote (novas e
+    # já existentes) têm um objeto/ID resolvido, então dá pra vincular
+    # a VLAN na porta física escolhida na revisão (campo "parent").
+    linked = 0
+    for vlan_name, parent_name in pending_parents:
+        vlan_if = processed_by_name.get(vlan_name)
+        parent_if = processed_by_name.get(parent_name) or existing_by_norm.get(normalize_ifname(parent_name))
+        if vlan_if and parent_if and vlan_if.id != parent_if.id:
+            vlan_if.update({"parent": parent_if.id})
+            linked += 1
+
     if created:
         changes.append(f"{created} interface(s) criada(s)")
     if updated:
         changes.append(f"{updated} interface(s) atualizada(s)")
     if matched_norm:
         changes.append(f"{matched_norm} casada(s) por nome normalizado")
+    if linked:
+        changes.append(f"{linked} VLAN(s) vinculada(s) à interface física")
 
     return changes
 

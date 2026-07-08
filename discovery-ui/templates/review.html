@@ -38,6 +38,8 @@
             <tr>
               <th class="w-1"><input type="checkbox" class="form-check-input m-0" checked onclick="this.closest('table').querySelectorAll('.if-cb').forEach(c => c.checked = this.checked)"></th>
               <th>Interface</th>
+              <th>Tipo <i class="ti ti-info-circle text-secondary" title="Sugerido automaticamente pelo nome -- confira e troque se precisar"></i></th>
+              <th>Interface física (VLAN) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN -- escolha a porta física onde essa VLAN está"></i></th>
               <th>Status</th>
               <th>Descrição</th>
             </tr>
@@ -50,6 +52,27 @@
                 <input type="checkbox" class="form-check-input m-0 if-cb" name="include_{{ loop.index0 }}" checked>
               </td>
               <td class="fw-medium">{{ iface.name }}</td>
+              <td>
+                <select name="type_{{ loop.index0 }}" class="form-select form-select-sm">
+                  {% for value, label in type_choices %}
+                  <option value="{{ value }}" {% if value == iface.guessed_type %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                {% if iface.is_vlan %}
+                <select name="parent_{{ loop.index0 }}" class="form-select form-select-sm">
+                  <option value="">— nenhuma —</option>
+                  {% for other_name in item.all_names %}
+                    {% if other_name != iface.name %}
+                    <option value="{{ other_name }}">{{ other_name }}</option>
+                    {% endif %}
+                  {% endfor %}
+                </select>
+                {% else %}
+                <span class="text-secondary">—</span>
+                {% endif %}
+              </td>
               <td>
                 <span class="badge {{ 'bg-success-lt' if iface.oper_status == 'up' else 'bg-red-lt' }}">{{ iface.oper_status }}</span>
               </td>

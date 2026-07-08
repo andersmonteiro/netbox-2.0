@@ -196,10 +196,10 @@
       </table>
     </div>
     <div class="card-footer d-flex align-items-center">
-      <button type="submit" class="btn btn-primary">
-        <i class="ti ti-radar me-1"></i>Rodar descoberta nos selecionados
+      <button type="submit" class="btn btn-primary" id="discover-submit-btn">
+        <i class="ti ti-radar me-1"></i>Iniciar Descoberta
       </button>
-      <span class="text-secondary ms-3">Pode levar alguns segundos por device -- nada é gravado no NetBox ainda, só depois da revisão.</span>
+      <span class="text-secondary ms-3" id="discover-hint">Pode levar alguns segundos por device -- nada é gravado no NetBox ainda, só depois da revisão.</span>
     </div>
   </form>
   {% else %}
@@ -259,6 +259,21 @@
       var cb = tr.querySelector('.dev-cb:not(:disabled)');
       if (cb) cb.checked = selectAll.checked;
     });
+  });
+
+  // ------------------------------------------------------------------
+  // Feedback visual ao rodar a descoberta -- a coleta é síncrona no
+  // servidor (SSH/SNMP por device, um de cada vez) e pode levar bastante
+  // tempo com muitos devices selecionados; sem isso o botão fica parado
+  // do mesmo jeito e parece que a página travou/recarregou sozinha.
+  // ------------------------------------------------------------------
+  var discoverForm = document.getElementById('discover-form');
+  var discoverBtn = document.getElementById('discover-submit-btn');
+  discoverForm.addEventListener('submit', function () {
+    var anyChecked = discoverForm.querySelector('.dev-cb:checked');
+    if (!anyChecked) return;
+    discoverBtn.disabled = true;
+    discoverBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Descobrindo, aguarde...';
   });
 
   // ------------------------------------------------------------------

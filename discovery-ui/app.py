@@ -521,9 +521,21 @@ def review():
                 data = json.loads(f.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            n_up = sum(1 for i in data.get("interfaces", []) if i.get("oper_status") == "up")
-            items.append({"filename": f.name, "data": data, "n_interfaces": len(data.get("interfaces", [])), "n_up": n_up})
-    return render_template("review.html", items=items)
+            interfaces = data.get("interfaces", [])
+            all_names = [i.get("name") for i in interfaces if i.get("name")]
+            for iface in interfaces:
+                # Chute de tipo/flag de VLAN calculados aqui (não gravados
+                # no JSON em disco) -- assim uma descoberta que já estava
+                # pendente antes dessa mudança também ganha a sugestão sem
+                # precisar rodar de novo.
+                iface["guessed_type"] = core.guess_interface_type(iface.get("name"))
+                iface["is_vlan"] = core.is_vlan_ifname(iface.get("name"))
+            n_up = sum(1 for i in interfaces if i.get("oper_status") == "up")
+            items.append({
+                "filename": f.name, "data": data, "n_interfaces": len(interfaces), "n_up": n_up,
+                "all_names": all_names,
+            })
+    return render_template("review.html", items=items, type_choices=core.INTERFACE_TYPE_CHOICES)
 
 
 def _safe_output_path(filename):
@@ -554,7 +566,14 @@ def review_apply(filename):
         name = request.form[f"iface_name_{idx}"]
         include = request.form.get(f"include_{idx}") == "on"
         desc = request.form.get(f"desc_{idx}", "")
-        interface_filter[name] = {"include": include, "description": desc}
+        iface_type = request.form.get(f"type_{idx}", "").strip()
+        parent_name = request.form.get(f"parent_{idx}", "").strip()
+        interface_filter[name] = {
+            "include": include,
+            "description": desc,
+            "type": iface_type or None,
+            "parent_name": parent_name or None,
+        }
         idx += 1
 
     changes = core.apply_device_result(nb, device, data, interface_filter=interface_filter)
