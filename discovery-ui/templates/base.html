@@ -140,13 +140,21 @@
     .navbar-brand .fw-bold { color: #fff; }
     .navbar-brand .fw-bold .accent { color: var(--nbo-accent); }
 
-    /* Grupo da direita (status API / tema / usuário) -- força a mesma
-       altura de linha em todo mundo, senão o badge (fonte menor, com seu
-       próprio padding) fica com o centro visual em outra altura que o
-       ícone do tema e o nome do usuário, mesmo os três estando dentro
-       do mesmo flex com align-items:center. */
-    .navbar-actions, .navbar-actions .nav-link { line-height: 1; }
-    .navbar-actions .badge { vertical-align: middle; }
+    /* Grupo da direita (status API / tema / usuário) -- confiar só em
+       align-items:center não bastou (o badge, com fonte/padding
+       próprios, continuava com o centro visual mais alto que o ícone e
+       o nome). Aqui força os TRÊS a terem a MESMA altura fixa em pixel
+       e centraliza o conteúdo de cada um dentro dela -- assim a altura
+       deixa de depender do conteúdo interno (badge vs ícone vs texto) e
+       o alinhamento fica garantido, não só "tentado". */
+    .navbar-action-link {
+      display: flex !important;
+      align-items: center !important;
+      height: 2.25rem;
+      line-height: 1 !important;
+      padding: 0 .5rem !important;
+    }
+    .navbar-action-link .badge { vertical-align: middle; }
 
     /* Botões no estilo "Start for free" (claro, sólido) / "Get a demo"
        (escuro, contornado) do site -- raio pequeno em vez do arredondado
@@ -230,8 +238,8 @@
         </ul>
 
         <div class="navbar-nav flex-row align-items-center ms-auto navbar-actions">
-          <div class="nav-item dropdown me-3 d-flex align-items-center">
-            <a href="#" class="nav-link d-flex align-items-center p-0" data-bs-toggle="dropdown" title="Status da API do NetBox">
+          <div class="nav-item dropdown me-2">
+            <a href="#" class="nav-link navbar-action-link" data-bs-toggle="dropdown" title="Status da API do NetBox">
               <span id="api-status-badge" class="badge bg-secondary-lt">
                 <span id="api-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;"></span>
                 <span id="api-status-text">verificando…</span>
@@ -241,11 +249,11 @@
               <a href="{{ url_for('settings_view') }}" class="dropdown-item"><i class="ti ti-settings me-2"></i>Configurações da API</a>
             </div>
           </div>
-          <a href="#" class="nav-link d-flex align-items-center px-2 me-2" id="theme-toggle-btn" title="Alternar tema claro/escuro">
+          <a href="#" class="nav-link navbar-action-link" id="theme-toggle-btn" title="Alternar tema claro/escuro">
             <i class="ti" id="theme-toggle-icon"></i>
           </a>
-          <div class="nav-item dropdown d-flex align-items-center">
-            <a href="#" class="nav-link d-flex align-items-center lh-1 text-reset p-0" data-bs-toggle="dropdown">
+          <div class="nav-item dropdown">
+            <a href="#" class="nav-link navbar-action-link text-reset" data-bs-toggle="dropdown">
               <span class="fw-medium">{{ session.get('username') }}</span>
               <i class="ti ti-chevron-down ms-1 text-secondary" style="font-size: .8rem;"></i>
             </a>

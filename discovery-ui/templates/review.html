@@ -49,7 +49,7 @@
         <table class="table table-vcenter card-table table-review">
           <thead>
             <tr>
-              <th class="w-1"><input type="checkbox" class="form-check-input m-0" checked onclick="this.closest('table').querySelectorAll('.if-cb').forEach(c => c.checked = this.checked)"></th>
+              <th class="col-check"><input type="checkbox" class="form-check-input m-0" checked onclick="this.closest('table').querySelectorAll('.if-cb').forEach(c => c.checked = this.checked)"></th>
               <th class="col-iface">Interface</th>
               <th class="col-type">Tipo <i class="ti ti-info-circle text-secondary" title="Sugerido automaticamente pelo nome -- confira e troque se precisar"></i></th>
               <th class="col-parent">Interface física (VLAN) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN -- escolha a porta física onde essa VLAN está"></i></th>
@@ -118,19 +118,24 @@
   .card-header[aria-expanded="false"] .review-chevron { transform: rotate(-90deg); }
   .review-chevron { display: inline-block; transition: transform 0.15s ease; }
 
-  /* Largura mínima por coluna -- sem isso o navegador espreme select/
-     input pra caber tudo na largura visível, cortando o texto (ex:
-     "SFP+ (10GE)" virando "SFP+…"). Com min-width, a tabela cresce mais
-     que o card quando precisa, e o .table-responsive (herdado do
-     Tabler) dá scroll horizontal em vez de espremer -- melhor que
-     truncar informação que o operador precisa ver inteira. */
-  .table-review { min-width: 1400px; }
-  .table-review .col-iface { min-width: 200px; }
-  .table-review .col-type { min-width: 190px; }
-  .table-review .col-parent { min-width: 190px; }
-  .table-review .col-status { min-width: 90px; }
-  .table-review .col-ip { min-width: 200px; }
-  .table-review .col-desc { min-width: 240px; }
+  /* Largura por coluna, em %, com table-layout:fixed -- cada device tem
+     sua PRÓPRIA <table> (uma por card), e sem isso o navegador ajusta a
+     largura de cada uma com base só no PRÓPRIO conteúdo: um device com
+     IP mais comprido numa porta empurra a coluna de IP mais larga só
+     naquela tabela, então de um card pro outro as colunas não batem
+     (ex: Mikrotik x Huawei). Com % + table-layout:fixed, a largura de
+     cada coluna vira sempre a mesma fração da largura do card (que é a
+     mesma em todo card), então as colunas alinham entre os devices --
+     e como o texto ainda quebra linha dentro da célula, nada é cortado,
+     só a linha fica mais alta quando precisa. */
+  .table-review { table-layout: fixed; width: 100%; min-width: 1000px; }
+  .table-review .col-check { width: 3%; }
+  .table-review .col-iface { width: 15%; }
+  .table-review .col-type { width: 14%; }
+  .table-review .col-parent { width: 13%; }
+  .table-review .col-status { width: 6%; }
+  .table-review .col-ip { width: 13%; }
+  .table-review .col-desc { width: 36%; }
 </style>
 {% endif %}
 {% endblock %}
