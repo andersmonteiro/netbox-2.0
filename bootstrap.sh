@@ -486,7 +486,7 @@ NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 log "7/8 Build da imagem (com plugins)..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty build --no-cache < /dev/null)
 
-log "8/8 Subindo a stack (pode levar vários minutos na 1ª vez -- leva grande de migrations)..."
+log "8/8 Subindo a stack..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty up -d < /dev/null)
 echo "    Stack no ar."
 
