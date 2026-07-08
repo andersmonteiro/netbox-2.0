@@ -100,12 +100,12 @@ services:
   # automation-scripts/discovery_core.py, compartilhado com o CLI. O
   # volume abaixo aponta pra mesma pasta discovery_output/ usada pelo
   # CLI (discovery_netbox.py), então um device coletado por um aparece
-  # pra revisão no outro. A pasta/serviço continuam se chamando
-  # "discovery-ui" internamente (é o nome técnico usado no compose,
-  # Dockerfile, bootstrap.sh etc.) -- só o container e a interface é
-  # que se chamam "NetBox Oracle".
+  # pra revisão no outro. A pasta do código-fonte continua se chamando
+  # "discovery-ui/" no disco (organização interna, não aparece pro
+  # usuário), mas o serviço/imagem/container agora se chamam todos
+  # "netbox-oracle".
   # --------------------------------------------------------------------
-  discovery-ui:
+  netbox-oracle:
     build:
       context: .
       dockerfile: discovery-ui/Dockerfile

@@ -21,7 +21,7 @@
 # ==========================================================================
 
 services:
-  discovery-ui:
+  netbox-oracle:
     build:
       context: .
       dockerfile: discovery-ui/Dockerfile

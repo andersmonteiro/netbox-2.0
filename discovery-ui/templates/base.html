@@ -6,21 +6,107 @@
   <title>{% block title %}NetBox Oracle{% endblock %}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     /*
-      Paleta aproximada da UI "next-gen" do NetBox (v4.1+), que também é
-      construída sobre o Tabler -- sobrescrevemos só a cor de destaque
-      (teal) pra ficar visualmente alinhado, sem depender do CSS real do
-      NetBox (que não temos acesso aqui no container da discovery-ui).
+      Visual inspirado no site institucional netboxlabs.com: fundo quase
+      preto (não o cinza-azulado padrão do Tabler dark), acento
+      teal/menta vibrante (a marca usa #00F2D4 no logo "labs"), tipografia
+      neutra com tracking apertado nos títulos grandes, botões com cantos
+      quase retos (raio pequeno) -- primário sólido claro, secundário
+      escuro com borda sutil. A fonte usada por eles é proprietária
+      (OpenSauceTwo, hospedada no domínio deles), então usamos Inter via
+      Google Fonts como substituta -- mesma personalidade neutra/geométrica,
+      sem reproduzir o arquivo de fonte deles.
     */
     :root, [data-bs-theme=dark] {
-      --tblr-primary: #0f9488;
-      --tblr-primary-rgb: 15, 148, 136;
-      --tblr-link-color: #2dd4bf;
-      --tblr-link-color-rgb: 45, 212, 191;
+      --nbo-bg: #04070a;
+      --nbo-surface: #0b1013;
+      --nbo-border: rgba(0, 242, 212, .14);
+      --nbo-accent: #00f2d4;
+      --nbo-accent-rgb: 0, 242, 212;
+      --nbo-text-muted: #b3b6b7;
+
+      --tblr-font-sans-serif: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      --tblr-body-bg: var(--nbo-bg);
+      --tblr-bg-surface: var(--nbo-surface);
+      --tblr-border-color: var(--nbo-border);
+      --tblr-primary: var(--nbo-accent);
+      --tblr-primary-rgb: var(--nbo-accent-rgb);
+      --tblr-link-color: var(--nbo-accent);
+      --tblr-link-color-rgb: var(--nbo-accent-rgb);
+      --tblr-border-radius: .25rem;
+      --tblr-border-radius-sm: .25rem;
+      --tblr-border-radius-lg: .5rem;
     }
+
+    body {
+      background: var(--nbo-bg);
+      font-family: var(--tblr-font-sans-serif);
+    }
+    h1, h2, h3, h4, .page-title {
+      font-weight: 600;
+      letter-spacing: -.02em;
+    }
+    .text-secondary { color: var(--nbo-text-muted) !important; }
+
+    .navbar { background: transparent; border-bottom: 1px solid rgba(255,255,255,.08); }
     .navbar-brand-image { height: 1.6rem; }
+    .navbar-brand .fw-bold { color: #fff; }
+    .navbar-brand .fw-bold .accent { color: var(--nbo-accent); }
+
+    /* Botões no estilo "Start for free" (claro, sólido) / "Get a demo"
+       (escuro, contornado) do site -- raio pequeno em vez do arredondado
+       padrão do Tabler. */
+    .btn { border-radius: var(--tblr-border-radius); font-weight: 500; }
+    .btn-primary {
+      background: #fff;
+      border-color: #fff;
+      color: #04070a;
+    }
+    .btn-primary:hover, .btn-primary:focus {
+      background: #e4e6e7;
+      border-color: #e4e6e7;
+      color: #04070a;
+    }
+    .btn-outline-secondary {
+      background: #14181b;
+      border-color: rgba(255,255,255,.14);
+      color: #fff;
+    }
+    .btn-outline-secondary:hover {
+      background: #1c2124;
+      border-color: rgba(255,255,255,.24);
+      color: #fff;
+    }
+
+    .card {
+      background: var(--nbo-surface);
+      border: 1px solid var(--nbo-border);
+      box-shadow: 0 0 60px -20px rgba(var(--nbo-accent-rgb), .12);
+    }
+    .card-header, .card-footer { border-color: var(--nbo-border); }
+    .table { --tblr-table-bg: transparent; }
+    .table thead th { color: var(--nbo-text-muted); border-color: var(--nbo-border); font-weight: 500; }
+    .table td, .table th { border-color: var(--nbo-border); }
+
+    .badge.bg-teal-lt { background: rgba(var(--nbo-accent-rgb), .16) !important; color: var(--nbo-accent) !important; }
     .badge-method { text-transform: uppercase; letter-spacing: .02em; }
+
+    .form-control, .form-select {
+      background: #0b1013;
+      border-color: rgba(255,255,255,.14);
+      color: #fff;
+    }
+    .form-control:focus, .form-select:focus {
+      background: #0b1013;
+      border-color: var(--nbo-accent);
+      box-shadow: 0 0 0 .2rem rgba(var(--nbo-accent-rgb), .18);
+      color: #fff;
+    }
+
     .required-star::after { content: " *"; color: var(--tblr-red); }
   </style>
 </head>
@@ -29,8 +115,8 @@
     <header class="navbar navbar-expand-md navbar-dark d-print-none">
       <div class="container-xl">
         <a href="{{ url_for('dashboard') if session.get('logged_in') else url_for('login') }}" class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
-          <i class="ti ti-radar-2 fs-2 me-2" style="color: var(--tblr-primary);"></i>
-          <span class="fw-bold">NetBox Oracle</span>
+          <i class="ti ti-radar-2 fs-2 me-2" style="color: var(--nbo-accent);"></i>
+          <span class="fw-bold">NetBox<span class="accent">Oracle</span></span>
         </a>
         {% if session.get('logged_in') %}
         <div class="navbar-nav flex-row order-md-last">

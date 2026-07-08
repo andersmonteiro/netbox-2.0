@@ -522,7 +522,7 @@ if [ -n "$REAL_TOKEN" ] && [ "$REAL_TOKEN" != "$FINAL_TOKEN" ]; then
     sed -i "s|^NETBOX_TOKEN=.*|NETBOX_TOKEN=${REAL_TOKEN}|" "$ENV_FILE"
     sed -i "s|^DISCOVERY_UI_NETBOX_TOKEN=.*|DISCOVERY_UI_NETBOX_TOKEN=${REAL_TOKEN}|" "$ENV_FILE"
     FINAL_TOKEN="$REAL_TOKEN"
-    (cd "$REPO_DIR/netbox-docker" && docker compose up -d discovery-ui < /dev/null) >/dev/null 2>&1 || true
+    (cd "$REPO_DIR/netbox-docker" && docker compose up -d --force-recreate netbox-oracle < /dev/null) >/dev/null 2>&1 || true
 elif [ -z "$REAL_TOKEN" ]; then
     warn "Não consegui confirmar o token real do superusuário -- se o NetBox Oracle mostrar erro 403 'Invalid token', confira manualmente: docker compose exec netbox python3 /opt/netbox/netbox/manage.py shell -c \"from users.models import Token; print(Token.objects.first().key)\""
 fi

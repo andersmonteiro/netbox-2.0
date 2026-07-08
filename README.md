@@ -429,13 +429,13 @@ Nem toda foto do catálogo tem uma imagem correspondente em
 imagem no NetBox até alguém subir o arquivo certo (Device Types > editar
 > Front/Rear image).
 
-## 3. Instalação standalone da discovery-ui (cliente que já tem NetBox)
+## 3. Instalação standalone do NetBox Oracle (cliente que já tem NetBox)
 
 Pra clientes que **já têm um NetBox rodando** (deste template ou de
 qualquer outra instalação) e só querem a ferramenta de descoberta
 apontando pra ele via API — sem subir NetBox, Postgres, Redis nem nada
 do resto da stack, e **sem mexer no que já está em produção**. Sobe só
-o container `discovery-ui`.
+o container `netbox-oracle`.
 
 É o mesmo `bootstrap.sh` da seção 1, só que no modo "só discovery-ui" —
 rodando com terminal interativo ele pergunta na hora (opção 2). Pra
