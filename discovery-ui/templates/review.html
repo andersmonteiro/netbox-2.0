@@ -53,7 +53,8 @@
               <th>Tipo <i class="ti ti-info-circle text-secondary" title="Sugerido automaticamente pelo nome -- confira e troque se precisar"></i></th>
               <th>Interface física (VLAN) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN -- escolha a porta física onde essa VLAN está"></i></th>
               <th>Status</th>
-              <th>IP <i class="ti ti-info-circle text-secondary" title="IP(s) já atribuído(s) a essa interface no NetBox -- só informativo, atribuir IP é feito depois, direto no NetBox"></i></th>
+              <th>IP (NetBox) <i class="ti ti-info-circle text-secondary" title="IP(s) já atribuído(s) a essa interface no NetBox -- só informativo, atribuir IP é feito depois, direto no NetBox"></i></th>
+              <th>IP (descoberto) <i class="ti ti-info-circle text-secondary" title="IP(s) configurado(s) na porta, lido agora via SNMP e/ou SSH -- só informativo, não é gravado automaticamente no NetBox"></i></th>
               <th>Descrição <i class="ti ti-info-circle text-secondary" title="Já vem preenchido com o que estiver salvo no NetBox pra essa interface -- edite se precisar"></i></th>
             </tr>
           </thead>
@@ -87,9 +88,10 @@
                 {% endif %}
               </td>
               <td>
-                <span class="badge {{ 'bg-success-lt' if iface.oper_status == 'up' else 'bg-red-lt' }}">{{ iface.oper_status }}</span>
+                <span class="badge text-uppercase {{ 'bg-success-lt' if iface.oper_status == 'up' else 'bg-red-lt' }}">{{ iface.oper_status }}</span>
               </td>
               <td class="text-secondary">{{ iface.existing_ips|join(', ') if iface.existing_ips else '—' }}</td>
+              <td class="text-secondary">{{ iface.ip_addresses|join(', ') if iface.ip_addresses else '—' }}</td>
               <td><input type="text" name="desc_{{ loop.index0 }}" class="form-control form-control-sm" value="{{ iface.existing_description or iface.descr or '' }}"></td>
             </tr>
             {% endfor %}

@@ -13,6 +13,7 @@ Mantido separado do CLI de propósito, pra não duplicar a lógica de
 coleta/aplicação entre os dois front-ends.
 """
 
+import ipaddress
 import os
 import re
 import subprocess
@@ -55,6 +56,14 @@ OID_IF_NAME = "1.3.6.1.2.1.31.1.1.1.1"  # ifXTable -- nome mais legível, quando
 OID_IF_ALIAS = "1.3.6.1.2.1.31.1.1.1.18"
 OID_IF_ADMIN_STATUS = "1.3.6.1.2.1.2.2.1.7"
 OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"
+# ipAddrTable (RFC1213-MIB) -- tabela clássica de IP por interface. Só
+# IPv4, mas é suportada por praticamente todo device (Cisco/Huawei/
+# MikroTik/Juniper), suficiente pra mostrar o IP configurado em cada
+# porta na revisão. Diferente das tabelas acima (indexadas por
+# ifIndex), essa é indexada pelo PRÓPRIO endereço IP -- ver
+# _snmp_walk_ip_indexed().
+OID_IP_AD_ENT_IF_INDEX = "1.3.6.1.2.1.4.20.1.2"
+OID_IP_AD_ENT_NET_MASK = "1.3.6.1.2.1.4.20.1.3"
 
 
 def _snmp_cmd(binary, host, community, oid, timeout, retries):
@@ -95,6 +104,52 @@ def snmp_walk(host, community, oid, timeout=5, retries=1):
     return out
 
 
+def _snmp_walk_ip_indexed(host, community, base_oid, timeout=5, retries=1):
+    """Como snmp_walk(), mas pra tabelas indexadas pelo próprio endereço
+    IP (ex: ipAddrTable) em vez de um índice inteiro simples (ifIndex).
+    snmp_walk() pega só o ÚLTIMO componente do OID como índice, o que
+    pra essas tabelas pegaria só o último octeto do IP (ex: '1' em vez
+    de '10.0.0.1') -- aqui pegamos os 4 últimos componentes (o IPv4
+    completo) como chave."""
+    cmd = _snmp_cmd("snmpwalk", host, community, base_oid, timeout, retries)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * (retries + 1) + 15)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "snmpwalk falhou (sem stderr)")
+    out = {}
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        oid_full, _, value = line.partition(" ")
+        parts = oid_full.split(".")
+        ip = ".".join(parts[-4:])  # últimos 4 componentes = o IPv4 em si
+        out[ip] = value.strip().strip('"')
+    return out
+
+
+def _netmask_to_prefixlen(netmask):
+    """'255.255.255.0' -> 24. None se não conseguir parsear."""
+    try:
+        return ipaddress.IPv4Network(f"0.0.0.0/{netmask}").prefixlen
+    except Exception:
+        return None
+
+
+def _collect_snmp_interface_ips(host, community, timeout, retries):
+    """IPs configurados em cada interface (RFC1213 ipAddrTable), já em
+    notação CIDR -- retorna {ifindex: ['x.x.x.x/yy', ...]}. Best-effort:
+    quem chama trata falha/tabela ausente como opcional (nem todo device
+    responde essa tabela, embora seja bem padrão)."""
+    ip_if_index = _snmp_walk_ip_indexed(host, community, OID_IP_AD_ENT_IF_INDEX, timeout, retries)
+    ip_netmask = _snmp_walk_ip_indexed(host, community, OID_IP_AD_ENT_NET_MASK, timeout, retries)
+    by_ifindex = {}
+    for ip, ifidx in ip_if_index.items():
+        prefixlen = _netmask_to_prefixlen(ip_netmask.get(ip))
+        cidr = f"{ip}/{prefixlen}" if prefixlen is not None else ip
+        by_ifindex.setdefault(ifidx, []).append(cidr)
+    return by_ifindex
+
+
 def _normalize_status(raw):
     """Aceita tanto '1'/'2' quanto 'up(1)'/'down(2)' (varia conforme o
     device e a versão do net-snmp instalada)."""
@@ -130,6 +185,13 @@ def collect_snmp(device, community, timeout=5, retries=1, ssh_username=None, ssh
             if_alias = {}
         admin_status = snmp_walk(host, community, OID_IF_ADMIN_STATUS, timeout, retries)
         oper_status = snmp_walk(host, community, OID_IF_OPER_STATUS, timeout, retries)
+        # IP configurado em cada porta (ipAddrTable) -- opcional, nem
+        # todo device responde essa tabela (ex: alguns firmwares OLT),
+        # então uma falha aqui não derruba o resto da coleta SNMP.
+        try:
+            ips_by_ifindex = _collect_snmp_interface_ips(host, community, timeout, retries)
+        except Exception:
+            ips_by_ifindex = {}
 
         interfaces = []
         for idx, descr in if_descr.items():
@@ -144,6 +206,7 @@ def collect_snmp(device, community, timeout=5, retries=1, ssh_username=None, ssh
                     "descr": if_alias.get(idx) or "",
                     "admin_status": _normalize_status(admin_status.get(idx)),
                     "oper_status": _normalize_status(oper_status.get(idx)),
+                    "ip_addresses": ips_by_ifindex.get(idx, []),
                 }
             )
         data["interfaces"] = interfaces
@@ -370,12 +433,34 @@ def collect_ssh(device, username, password, port=None):
         napalm_interfaces = conn.get_interfaces()
     except Exception as exc:
         data["errors"].append(f"falha ao conectar: {exc}")
+        try:
+            conn.close()
+        except Exception:
+            pass
         return data
+
+    # IP configurado em cada porta -- getter separado do NAPALM
+    # (get_interfaces_ip), opcional: nem todo driver implementa 100%
+    # pra todo vendor, então uma falha aqui não derruba a coleta
+    # principal (interfaces/status já vieram acima).
+    try:
+        napalm_ips = conn.get_interfaces_ip()
+    except Exception:
+        napalm_ips = {}
     finally:
         try:
             conn.close()
         except Exception:
             pass
+
+    def _ips_for(name):
+        info = napalm_ips.get(name) or {}
+        result = []
+        for family in ("ipv4", "ipv6"):
+            for addr, meta in (info.get(family) or {}).items():
+                prefix = meta.get("prefix_length")
+                result.append(f"{addr}/{prefix}" if prefix is not None else addr)
+        return result
 
     data["serial"] = facts.get("serial_number") or None
     data["os_version"] = facts.get("os_version") or None
@@ -386,6 +471,7 @@ def collect_ssh(device, username, password, port=None):
             "admin_status": "up" if info.get("is_enabled") else "down",
             "oper_status": "up" if info.get("is_up") else "down",
             "mac_address": info.get("mac_address") or None,
+            "ip_addresses": _ips_for(name),
         }
         for name, info in napalm_interfaces.items()
     ]
@@ -404,6 +490,15 @@ def _merge_interface(snmp_if, ssh_if):
         ssh_val = (ssh_if or {}).get(key)
         if ssh_val:
             base[key] = ssh_val
+    # IPs: aqui não é "SSH sobrescreve SNMP" como acima -- os dois lados
+    # são fontes igualmente válidas do mesmo fato (IP configurado na
+    # porta), então juntamos os dois (união, sem duplicar) em vez de um
+    # substituir o outro.
+    ssh_ips = (ssh_if or {}).get("ip_addresses") or []
+    snmp_ips = (snmp_if or {}).get("ip_addresses") or []
+    merged_ips = list(dict.fromkeys(list(ssh_ips) + list(snmp_ips)))
+    if merged_ips:
+        base["ip_addresses"] = merged_ips
     return base
 
 
