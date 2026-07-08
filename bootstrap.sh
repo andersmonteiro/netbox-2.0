@@ -302,9 +302,19 @@ else
 
     (cd "$REPO_DIR/netbox-docker" && docker compose up -d postgres redis redis-cache < /dev/null) >/dev/null
 
+    # Não confiamos em "pg_isready" sozinho pra decidir que já pode
+    # consultar: no primeiro boot (volume vazio), o container do
+    # postgres sobe uma instância TEMPORÁRIA só pra rodar scripts de
+    # init, derruba e sobe de novo a instância de verdade -- pg_isready
+    # pode responder "pronto" nessa instância temporária, antes do
+    # socket real existir, dando um falso positivo. Em vez de checar
+    # prontidão separado, tentamos a query de verdade em loop -- só
+    # avança quando ela responder com sucesso.
     PG_READY=false
-    for _pg_try in $(seq 1 30); do
-        if (cd "$REPO_DIR/netbox-docker" && docker compose exec -T postgres pg_isready -q -U "$PG_USER" -d "$PG_DB" < /dev/null); then
+    DB_HAS_SCHEMA=""
+    for _pg_try in $(seq 1 40); do
+        if RAW_OUT="$(cd "$REPO_DIR/netbox-docker" && docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -tAc "SELECT to_regclass('public.django_migrations');" < /dev/null 2>/dev/null)"; then
+            DB_HAS_SCHEMA="$(echo "$RAW_OUT" | tr -d '[:space:]')"
             PG_READY=true
             break
         fi
@@ -314,7 +324,6 @@ else
     if [ "$PG_READY" != "true" ]; then
         warn "Postgres não respondeu a tempo -- pulando restauração do catálogo de device types. Rode manualmente depois (seção 2.5 do README) se quiser."
     else
-        DB_HAS_SCHEMA="$(cd "$REPO_DIR/netbox-docker" && docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -tAc "SELECT to_regclass('public.django_migrations');" < /dev/null | tr -d '[:space:]')"
         if [ -z "$DB_HAS_SCHEMA" ]; then
             echo "    Banco vazio (1ª instalação) -- restaurando netbox-seed/device-catalog.sql..."
             SEED_LOG="$REPO_DIR/netbox-docker/seed-restore.log"
