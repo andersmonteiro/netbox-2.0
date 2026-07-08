@@ -50,6 +50,10 @@
 #      pra isso, então o `docker compose up -d` espera sozinho até
 #      ficar saudável, sem imprimir erro de dependência no meio do
 #      caminho.
+#   7. Cria os Custom Fields de descoberta no NetBox (discovery_method/
+#      discovery_username/discovery_password/discovery_snmp_community)
+#      -- sem isso, cadastrar/editar device pelo NetBox Oracle dá erro
+#      400. Idempotente, roda de novo numa reinstalação sem duplicar.
 #
 # Testado em Ubuntu/Debian. Em outras distros, os passos 1-2 podem
 # precisar de ajuste manual (o script avisa e continua mesmo assim).
@@ -278,6 +282,24 @@ if [ "$INSTALL_MODE" = "discovery-only" ]; then
     docker rm -f netbox-oracle >/dev/null 2>&1 || true
     (cd "$REPO_DIR" && docker compose -f docker-compose.discovery-ui.yml --env-file "$DISCOVERY_ENV_FILE" --progress=tty up -d --build < /dev/null)
 
+    # Custom Fields de descoberta no NetBox do cliente -- mesma lógica da
+    # instalação completa (ver comentário lá embaixo), só que aqui contra
+    # um NetBox de terceiros que já existia antes.
+    log "Criando custom fields de descoberta no NetBox..."
+    CF_LOG="$REPO_DIR/discovery-fields.log"
+    if (
+        cd "$REPO_DIR/automation-scripts"
+        python3 -m venv .venv >/dev/null 2>&1 || true
+        # shellcheck disable=SC1091
+        source .venv/bin/activate
+        pip install -q -r requirements.txt
+        NETBOX_URL="$NETBOX_URL" NETBOX_TOKEN="$NETBOX_TOKEN" python create_discovery_fields.py
+    ) > "$CF_LOG" 2>&1; then
+        echo "    Custom fields prontos."
+    else
+        warn "Não consegui criar os custom fields de descoberta automaticamente -- detalhes em $CF_LOG. Rode manualmente depois (seção 2.4 do README)."
+    fi
+
     SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
     cat <<EOF
 
@@ -292,13 +314,6 @@ Usuário:       $(grep '^DISCOVERY_UI_USER=' "$DISCOVERY_ENV_FILE" | cut -d= -f2
 Senha:         $(grep '^DISCOVERY_UI_PASSWORD=' "$DISCOVERY_ENV_FILE" | cut -d= -f2)
 
 *** Anote a senha acima agora — ela não aparece de novo. ***
-
-Antes de usar, confirme que os Custom Fields de descoberta já existem
-nesse NetBox (rode uma vez, se ainda não rodou):
-  cd $REPO_DIR/automation-scripts
-  python3 -m venv .venv && source .venv/bin/activate
-  pip install -r requirements.txt
-  NETBOX_URL=${NETBOX_URL} NETBOX_TOKEN=${NETBOX_TOKEN} python create_discovery_fields.py
 ==========================================================================
 EOF
     exit 0
@@ -525,6 +540,28 @@ if [ -n "$REAL_TOKEN" ] && [ "$REAL_TOKEN" != "$FINAL_TOKEN" ]; then
     (cd "$REPO_DIR/netbox-docker" && docker compose up -d --force-recreate netbox-oracle < /dev/null) >/dev/null 2>&1 || true
 elif [ -z "$REAL_TOKEN" ]; then
     warn "Não consegui confirmar o token real do superusuário -- se o NetBox Oracle mostrar erro 403 'Invalid token', confira manualmente: docker compose exec netbox python3 /opt/netbox/netbox/manage.py shell -c \"from users.models import Token; print(Token.objects.first().key)\""
+fi
+
+# --------------------------------------------------------------------
+# Custom Fields de descoberta (discovery_method, discovery_username,
+# discovery_password, discovery_snmp_community) -- sem eles, cadastrar
+# ou editar um device pelo NetBox Oracle dá erro 400 "Custom field ...
+# does not exist for this object type". Cria uma vez só (idempotente,
+# ver automation-scripts/create_discovery_fields.py) direto contra o
+# NetBox que acabou de subir, usando o token real confirmado acima.
+# --------------------------------------------------------------------
+log "Criando custom fields de descoberta no NetBox..."
+if (
+    cd "$REPO_DIR/automation-scripts"
+    python3 -m venv .venv >/dev/null 2>&1 || true
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    pip install -q -r requirements.txt
+    NETBOX_URL="http://localhost:8000" NETBOX_TOKEN="$FINAL_TOKEN" python create_discovery_fields.py
+) > "$REPO_DIR/netbox-docker/discovery-fields.log" 2>&1; then
+    echo "    Custom fields prontos."
+else
+    warn "Não consegui criar os custom fields de descoberta automaticamente -- detalhes em $REPO_DIR/netbox-docker/discovery-fields.log. Rode manualmente depois (seção 2.4 do README): cd $REPO_DIR/automation-scripts && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && NETBOX_URL=http://localhost:8000 NETBOX_TOKEN=<token> python create_discovery_fields.py"
 fi
 
 # --------------------------------------------------------------------

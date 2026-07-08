@@ -299,6 +299,14 @@ def device_new():
             "instalação, não precisa repetir por device.",
             "error",
         )
+    if not platforms:
+        flash(
+            "Nenhuma Platform cadastrada no NetBox ainda -- necessário só pro "
+            "método SSH (NAPALM). Crie em NetBox > Devices > Platforms > Add, "
+            "com o Slug igual ao nome do driver NAPALM do fabricante (ex: "
+            "'huawei_vrp', 'cisco_ios', 'juniper_junos').",
+            "error",
+        )
 
     return render_template(
         "device_form.html", mode="new", device=None, cf={},
@@ -325,6 +333,14 @@ def device_edit(device_id):
             return redirect(url_for("device_edit", device_id=device_id))
 
     platforms = list(nb.dcim.platforms.all())
+    if not platforms:
+        flash(
+            "Nenhuma Platform cadastrada no NetBox ainda -- necessário só pro "
+            "método SSH (NAPALM). Crie em NetBox > Devices > Platforms > Add, "
+            "com o Slug igual ao nome do driver NAPALM do fabricante (ex: "
+            "'huawei_vrp', 'cisco_ios', 'juniper_junos').",
+            "error",
+        )
     cf = device.custom_fields or {}
     return render_template(
         "device_form.html", mode="edit", device=device, cf=cf,
