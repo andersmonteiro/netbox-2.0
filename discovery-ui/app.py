@@ -63,11 +63,15 @@ DISCARDED_DIR = OUTPUT_DIR / "discarded"
 # tela de Configurações (/settings) sem precisar mexer no .env nem
 # reiniciar container -- útil porque o netbox-docker tem um bug
 # conhecido (netbox-community/netbox-docker#1647) onde o token real
-# gerado pelo NetBox às vezes não bate com o configurado. Guardamos em
-# discovery_output/oracle_settings.json, que já é um bind mount
-# persistente (mesma pasta usada como "caixa de entrada" de descobertas).
+# gerado pelo NetBox às vezes não bate com o configurado. Guardamos
+# dentro de uma SUBPASTA de discovery_output/ (que já é um bind mount
+# persistente) -- não pode ficar solto direto em discovery_output/,
+# porque dashboard() e review() fazem glob("*.json") ali pra contar/
+# listar descobertas pendentes, e glob não-recursivo ignora subpastas,
+# então isolar aqui evita o arquivo de config ser contado como se fosse
+# uma descoberta aguardando revisão.
 # --------------------------------------------------------------------
-SETTINGS_PATH = OUTPUT_DIR / "oracle_settings.json"
+SETTINGS_PATH = OUTPUT_DIR / "_oracle" / "settings.json"
 
 
 def load_settings():
@@ -84,7 +88,7 @@ def load_settings():
 
 
 def save_settings(url, token):
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(
         json.dumps({"netbox_url": url, "netbox_token": token}, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -219,10 +223,25 @@ def dashboard():
         cf = d.custom_fields or {}
         method = cf.get("discovery_method")
         has_cred = bool(cf.get("discovery_username") and cf.get("discovery_password")) if method == "ssh" else bool(cf.get("discovery_snmp_community")) if method == "snmp" else False
+        site = str(d.site) if d.site else ""
+        region = ""
+        try:
+            if d.site and getattr(d.site, "region", None):
+                region = str(d.site.region)
+        except Exception:
+            region = ""
+        manufacturer = ""
+        try:
+            if d.device_type and getattr(d.device_type, "manufacturer", None):
+                manufacturer = str(d.device_type.manufacturer)
+        except Exception:
+            manufacturer = ""
         rows.append({
             "id": d.id,
             "name": d.name,
-            "site": str(d.site) if d.site else "",
+            "site": site,
+            "region": region,
+            "manufacturer": manufacturer,
             "primary_ip": str(d.primary_ip4).split("/")[0] if d.primary_ip4 else None,
             "platform": str(d.platform) if d.platform else None,
             "method": method,
@@ -232,7 +251,14 @@ def dashboard():
 
     pending_count = len(list(OUTPUT_DIR.glob("*.json"))) if OUTPUT_DIR.exists() else 0
 
-    return render_template("dashboard.html", rows=rows, pending_count=pending_count)
+    filter_sites = sorted({r["site"] for r in rows if r["site"]})
+    filter_regions = sorted({r["region"] for r in rows if r["region"]})
+    filter_manufacturers = sorted({r["manufacturer"] for r in rows if r["manufacturer"]})
+
+    return render_template(
+        "dashboard.html", rows=rows, pending_count=pending_count,
+        filter_sites=filter_sites, filter_regions=filter_regions, filter_manufacturers=filter_manufacturers,
+    )
 
 
 # --------------------------------------------------------------------
