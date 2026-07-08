@@ -244,10 +244,11 @@
           </li>
         </ul>
 
-        <div class="navbar-nav flex-row align-items-center ms-auto navbar-actions">
-          <div class="nav-item dropdown me-2">
-            <a href="#" class="nav-link navbar-action-link" data-bs-toggle="dropdown" title="Status da API do NetBox">
-              <span id="api-status-badge" class="badge bg-secondary-lt">
+        <div class="navbar-nav flex-row align-items-center ms-auto navbar-actions" style="display:flex !important; align-items:center !important; height:2.5rem !important;">
+          <div class="nav-item dropdown me-2" style="display:flex !important; align-items:center !important; height:2.5rem !important;">
+            <a href="#" class="nav-link" data-bs-toggle="dropdown" title="Status da API do NetBox"
+               style="display:flex !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important;">
+              <span id="api-status-badge" class="badge bg-secondary-lt" style="display:inline-flex !important; align-items:center !important; vertical-align:middle !important;">
                 <span id="api-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;"></span>
                 <span id="api-status-text">verificando…</span>
               </span>
@@ -256,11 +257,13 @@
               <a href="{{ url_for('settings_view') }}" class="dropdown-item"><i class="ti ti-settings me-2"></i>Configurações da API</a>
             </div>
           </div>
-          <a href="#" class="nav-link navbar-action-link" id="theme-toggle-btn" title="Alternar tema claro/escuro">
+          <a href="#" class="nav-link" id="theme-toggle-btn" title="Alternar tema claro/escuro"
+             style="display:flex !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important;">
             <i class="ti" id="theme-toggle-icon"></i>
           </a>
-          <div class="nav-item dropdown">
-            <a href="#" class="nav-link navbar-action-link text-reset" data-bs-toggle="dropdown">
+          <div class="nav-item dropdown" style="display:flex !important; align-items:center !important; height:2.5rem !important;">
+            <a href="#" class="nav-link text-reset" data-bs-toggle="dropdown"
+               style="display:flex !important; align-items:center !important; height:2.5rem !important; padding:0 .5rem !important; line-height:1 !important; margin:0 !important;">
               <span class="fw-medium">{{ session.get('username') }}</span>
               <i class="ti ti-chevron-down ms-1 text-secondary" style="font-size: .8rem;"></i>
             </a>
