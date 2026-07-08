@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Configurações da API · NetBox Oracle{% endblock %}
+{% block content %}
+<div class="page-header d-print-none">
+  <h2 class="page-title">Configurações da API</h2>
+  <div class="text-secondary">URL e token de acesso ao NetBox. Salvar aqui não precisa de SSH nem reiniciar nada.</div>
+</div>
+
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <form class="card" method="post">
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label required-star">URL do NetBox</label>
+          <input type="text" name="netbox_url" class="form-control" value="{{ netbox_url }}" placeholder="http://192.168.1.10:8000" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Token de API</label>
+          <input
+            type="password"
+            name="netbox_token"
+            class="form-control"
+            placeholder="{% if masked_token %}atual: {{ masked_token }} -- deixe em branco pra manter{% else %}cole o token aqui{% endif %}"
+            autocomplete="off"
+          >
+          <div class="form-hint">
+            Gere em NetBox → seu usuário (canto superior direito) → API Tokens → Add a token
+            (precisa de permissão de escrita em dcim/ipam). O valor só é mostrado uma vez na tela do NetBox.
+          </div>
+        </div>
+      </div>
+      <div class="card-footer d-flex">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Cancelar</a>
+        <button type="submit" class="btn btn-primary ms-auto">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

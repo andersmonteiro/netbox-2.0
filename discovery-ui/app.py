@@ -57,9 +57,46 @@ OUTPUT_DIR = Path(__file__).parent / "discovery_output"
 APPLIED_DIR = OUTPUT_DIR / "applied"
 DISCARDED_DIR = OUTPUT_DIR / "discarded"
 
+# --------------------------------------------------------------------
+# Configuração da URL/token do NetBox: por padrão vem das variáveis de
+# ambiente (preenchidas na instalação), mas pode ser trocada depois pela
+# tela de Configurações (/settings) sem precisar mexer no .env nem
+# reiniciar container -- útil porque o netbox-docker tem um bug
+# conhecido (netbox-community/netbox-docker#1647) onde o token real
+# gerado pelo NetBox às vezes não bate com o configurado. Guardamos em
+# discovery_output/oracle_settings.json, que já é um bind mount
+# persistente (mesma pasta usada como "caixa de entrada" de descobertas).
+# --------------------------------------------------------------------
+SETTINGS_PATH = OUTPUT_DIR / "oracle_settings.json"
+
+
+def load_settings():
+    if SETTINGS_PATH.exists():
+        try:
+            data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+            return {
+                "netbox_url": data.get("netbox_url") or NETBOX_URL or "",
+                "netbox_token": data.get("netbox_token") or NETBOX_TOKEN or "",
+            }
+        except Exception:
+            pass
+    return {"netbox_url": NETBOX_URL or "", "netbox_token": NETBOX_TOKEN or ""}
+
+
+def save_settings(url, token):
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    SETTINGS_PATH.write_text(
+        json.dumps({"netbox_url": url, "netbox_token": token}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
 
 def get_nb():
-    return core.get_client(NETBOX_URL, NETBOX_TOKEN)
+    settings = load_settings()
+    url, token = settings["netbox_url"], settings["netbox_token"]
+    if not url or not token:
+        raise RuntimeError("NetBox ainda não configurado -- acesse Configurações da API.")
+    return core.get_client(url, token)
 
 
 def login_required(view):
@@ -69,6 +106,23 @@ def login_required(view):
             return redirect(url_for("login", next=request.path))
         return view(*args, **kwargs)
     return wrapped
+
+
+# Rotas que não dependem do NetBox estar configurado (senão a gente
+# criaria um loop de redirect pra /settings).
+_NETBOX_INDEPENDENT_ENDPOINTS = {"login", "logout", "settings_view", "api_status", "static"}
+
+
+@app.before_request
+def require_netbox_configured():
+    if not session.get("logged_in"):
+        return
+    if request.endpoint in _NETBOX_INDEPENDENT_ENDPOINTS:
+        return
+    settings = load_settings()
+    if not settings.get("netbox_url") or not settings.get("netbox_token"):
+        flash("Configure a URL e o token do NetBox antes de continuar.", "error")
+        return redirect(url_for("settings_view"))
 
 
 # --------------------------------------------------------------------
@@ -92,6 +146,58 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+# --------------------------------------------------------------------
+# configurações da API do NetBox (URL + token) e status ao vivo
+# --------------------------------------------------------------------
+
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings_view():
+    current = load_settings()
+    if request.method == "POST":
+        url = request.form.get("netbox_url", "").strip()
+        token = request.form.get("netbox_token", "").strip()
+        if not url:
+            flash("Informe a URL do NetBox.", "error")
+            return redirect(url_for("settings_view"))
+        if not token:
+            token = current.get("netbox_token", "")
+        save_settings(url, token)
+        flash("Configuração da API salva.", "success")
+        return redirect(url_for("settings_view"))
+
+    masked_token = ""
+    existing_token = current.get("netbox_token", "")
+    if existing_token:
+        masked_token = f"{existing_token[:4]}…{existing_token[-4:]}" if len(existing_token) > 8 else "••••"
+
+    return render_template(
+        "settings.html",
+        netbox_url=current.get("netbox_url", ""),
+        masked_token=masked_token,
+    )
+
+
+@app.route("/api/status")
+@login_required
+def api_status():
+    settings = load_settings()
+    url, token = settings.get("netbox_url"), settings.get("netbox_token")
+    if not url or not token:
+        return {"status": "unconfigured", "detail": "NetBox ainda não configurado"}
+
+    try:
+        nb = core.get_client(url, token)
+        nb.dcim.sites.count()
+        return {"status": "online", "detail": url}
+    except Exception as exc:
+        msg = str(exc)
+        low = msg.lower()
+        if "403" in msg or "forbidden" in low or "token" in low or "401" in msg:
+            return {"status": "unauthorized", "detail": "Token inválido ou sem permissão"}
+        return {"status": "offline", "detail": msg[:200]}
 
 
 # --------------------------------------------------------------------
