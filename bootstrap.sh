@@ -268,6 +268,14 @@ if [ "$INSTALL_MODE" = "discovery-only" ]; then
     fi
 
     log "$STEP_TOTAL/$STEP_TOTAL Build + subida do container (NetBox Oracle)..."
+    # O nome do container ("netbox-oracle") é o mesmo usado na instalação
+    # completa (docker-compose.override.yml), mas são dois projetos de
+    # compose diferentes -- o Docker não deixa dois containers com o
+    # mesmo nome ao mesmo tempo, mesmo em projetos diferentes. Se este
+    # servidor já rodou o outro modo antes, remove o container antigo
+    # (é só a interface, sem dado persistente importante) pra liberar o
+    # nome antes de subir o deste modo.
+    docker rm -f netbox-oracle >/dev/null 2>&1 || true
     (cd "$REPO_DIR" && docker compose -f docker-compose.discovery-ui.yml --env-file "$DISCOVERY_ENV_FILE" --progress=tty up -d --build < /dev/null)
 
     SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -472,6 +480,11 @@ log "6/$STEP_TOTAL Build da imagem (com plugins)..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty build --no-cache < /dev/null)
 
 log "7/$STEP_TOTAL Subindo a stack..."
+# Mesmo motivo do modo discovery-only: "netbox-oracle" é o nome do
+# container nos dois modos, em projetos de compose diferentes -- se este
+# servidor já rodou o modo standalone antes, libera o nome removendo o
+# container antigo (só a interface, sem dado persistente importante).
+docker rm -f netbox-oracle >/dev/null 2>&1 || true
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty up -d < /dev/null)
 echo "    Stack no ar."
 
