@@ -42,7 +42,7 @@ FIELDS = {
         "label": "Descoberta: método",
         "description": "Como o discovery_netbox.py deve descobrir este device (deixe em branco para não incluir na descoberta).",
         "choice_set": {
-            "extra_choices": [["ssh", "SSH (NAPALM)"], ["snmp", "SNMP"]],
+            "extra_choices": [["ssh", "SSH (NAPALM)"], ["snmp", "SNMP"], ["both", "SSH + SNMP"]],
         },
         "weight": 100,
     },
@@ -84,6 +84,32 @@ def main():
 
     for name, spec in FIELDS.items():
         existing = nb.extras.custom_fields.get(name=name)
+
+        choice_set = None
+        if "choice_set" in spec:
+            # NetBox exige um Custom Field Choice Set separado para
+            # campos tipo "select" -- cria (ou reaproveita) um antes.
+            choice_set_name = f"{name}_choices"
+            choice_set = nb.extras.custom_field_choice_sets.get(name=choice_set_name)
+            desired_choices = spec["choice_set"]["extra_choices"]
+            if not choice_set:
+                choice_set = nb.extras.custom_field_choice_sets.create(
+                    {"name": choice_set_name, "extra_choices": desired_choices}
+                )
+                print(f"[criado] choice set {choice_set_name}")
+            else:
+                # Instalação já existente, rodando o script de novo depois
+                # de uma opção nova ter sido adicionada aqui (ex: "both"
+                # pra discovery_method) -- adiciona só o que falta, sem
+                # remover nada que já esteja lá (evita quebrar devices já
+                # configurados com uma opção antiga).
+                current_values = {c[0] for c in (choice_set.extra_choices or [])}
+                missing = [c for c in desired_choices if c[0] not in current_values]
+                if missing:
+                    updated = list(choice_set.extra_choices or []) + missing
+                    choice_set.update({"extra_choices": updated})
+                    print(f"[atualizado] choice set {choice_set_name}: adicionado {[m[0] for m in missing]}")
+
         if existing:
             print(f"[já existe] {name}")
             continue
@@ -97,19 +123,7 @@ def main():
             "weight": spec["weight"],
             "required": False,
         }
-        if "choice_set" in spec:
-            # NetBox exige um Custom Field Choice Set separado para
-            # campos tipo "select" -- cria (ou reaproveita) um antes.
-            choice_set_name = f"{name}_choices"
-            choice_set = nb.extras.custom_field_choice_sets.get(name=choice_set_name)
-            if not choice_set:
-                choice_set = nb.extras.custom_field_choice_sets.create(
-                    {
-                        "name": choice_set_name,
-                        "extra_choices": spec["choice_set"]["extra_choices"],
-                    }
-                )
-                print(f"[criado] choice set {choice_set_name}")
+        if choice_set is not None:
             payload["choice_set"] = choice_set.id
 
         nb.extras.custom_fields.create(payload)

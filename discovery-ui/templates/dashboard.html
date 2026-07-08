@@ -137,18 +137,17 @@
                 {% endfor %}
               </select>
             </td>
-            <td>
-              <span class="view-val click-edit" tabindex="0">
-                {% if r.method == 'both' %}<span class="badge bg-teal-lt badge-method">SSH + SNMP</span>
-                {% elif r.method %}<span class="badge bg-teal-lt badge-method">{{ r.method|upper }}</span>
-                {% else %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
+            <td class="method-cell">
+              <span class="method-view" tabindex="0">
+                {% if 'ssh' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SSH<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span></span>{% endif %}
+                {% if 'snmp' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SNMP<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span></span>{% endif %}
+                {% if not r.method_list %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
               </span>
-              <select class="edit-val form-select form-select-sm f-method" style="display:none">
-                <option value="">— selecione —</option>
-                <option value="ssh" {% if r.method == 'ssh' %}selected{% endif %}>SSH (NAPALM)</option>
-                <option value="snmp" {% if r.method == 'snmp' %}selected{% endif %}>SNMP</option>
-                <option value="both" {% if r.method == 'both' %}selected{% endif %}>SSH + SNMP (cruza os dois)</option>
-              </select>
+              <div class="method-editor" style="display:none">
+                <label class="form-check mb-1"><input type="checkbox" class="form-check-input method-opt" value="ssh" {% if 'ssh' in r.method_list %}checked{% endif %}> SSH (NAPALM)</label>
+                <label class="form-check mb-0"><input type="checkbox" class="form-check-input method-opt" value="snmp" {% if 'snmp' in r.method_list %}checked{% endif %}> SNMP</label>
+              </div>
+              <input type="hidden" class="f-method" value="{{ r.method or '' }}">
             </td>
             {% set allow_ssh_cred = r.method in ('ssh', 'both') or (r.method == 'snmp' and 'mikrotik' in (r.manufacturer or '')|lower) %}
             <td>
@@ -217,6 +216,19 @@
 <style>
   .click-edit { cursor: pointer; border-bottom: 1px dashed transparent; }
   .click-edit:hover, .click-edit:focus { border-bottom-color: var(--nbo-accent); outline: none; }
+
+  .method-cell { position: relative; }
+  .method-view { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; min-height: 1.5rem; border-bottom: 1px dashed transparent; }
+  .method-view:hover, .method-view:focus { border-bottom-color: var(--nbo-accent); outline: none; }
+  .method-chip { display: inline-flex; align-items: center; gap: 4px; }
+  .chip-x { cursor: pointer; opacity: .6; font-size: .9em; line-height: 1; }
+  .chip-x:hover { opacity: 1; color: var(--tblr-red); }
+  .method-editor {
+    position: absolute; z-index: 20; top: 100%; left: 0; margin-top: 4px;
+    background: var(--nbo-surface); border: 1px solid var(--nbo-border);
+    border-radius: var(--tblr-border-radius); padding: .5rem .75rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .4); white-space: nowrap;
+  }
 </style>
 <script>
 (function () {
@@ -373,18 +385,6 @@
       editEl.style.display = '';
       editEl.focus();
       if (editEl.select) editEl.select();
-      // Sugestão automática só no campo Método, só se ainda não configurado.
-      if (editEl.classList.contains('f-method') && !editEl.value) {
-        var suggestion = suggestFor(tr.dataset.manufacturer, tr.dataset.deviceTypeModel);
-        if (suggestion) {
-          editEl.value = suggestion.method;
-          if (suggestion.platformSlug) {
-            var platformSelect = tr.querySelector('.f-platform');
-            var opt = platformSelect.querySelector('option[data-slug="' + suggestion.platformSlug + '"]');
-            if (opt) platformSelect.value = opt.value;
-          }
-        }
-      }
     }
 
     var startValue = editEl.value;
@@ -426,6 +426,116 @@
     }
   }
 
+  // ------------------------------------------------------------------
+  // Célula Método: em vez de um <select> de opção única, é um par de
+  // "chips" (SSH / SNMP) editável como checklist -- dá pra marcar os
+  // dois ao mesmo tempo (method="both", ver discovery_core.collect_both)
+  // ou remover um de cada vez clicando no "x" do chip, sem precisar abrir
+  // o checklist inteiro de novo.
+  // ------------------------------------------------------------------
+  function computeMethodValue(editorEl) {
+    var checked = Array.prototype.filter.call(
+      editorEl.querySelectorAll('.method-opt'),
+      function (cb) { return cb.checked; }
+    );
+    if (checked.length === 0) return '';
+    if (checked.length === 2) return 'both';
+    return checked[0].value;
+  }
+
+  function renderMethodView(viewEl, methodValue) {
+    var parts = [];
+    if (!methodValue) {
+      parts.push('<span class="badge bg-secondary-lt">não configurado</span>');
+    } else {
+      if (methodValue === 'ssh' || methodValue === 'both') {
+        parts.push('<span class="badge bg-teal-lt badge-method method-chip">SSH<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span></span>');
+      }
+      if (methodValue === 'snmp' || methodValue === 'both') {
+        parts.push('<span class="badge bg-teal-lt badge-method method-chip">SNMP<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span></span>');
+      }
+    }
+    viewEl.innerHTML = parts.join(' ');
+  }
+
+  function wireMethodCell(td, tr) {
+    var viewEl = td.querySelector('.method-view');
+    var editorEl = td.querySelector('.method-editor');
+    var hiddenInput = td.querySelector('.f-method');
+    if (!viewEl || !editorEl || !hiddenInput) return;
+
+    function openEditor() {
+      viewEl.style.display = 'none';
+      editorEl.style.display = '';
+      var first = editorEl.querySelector('.method-opt');
+      if (first) first.focus();
+      // Sugestão automática só se ainda não tem nada configurado.
+      if (!hiddenInput.value) {
+        var suggestion = suggestFor(tr.dataset.manufacturer, tr.dataset.deviceTypeModel);
+        if (suggestion) {
+          var opt = editorEl.querySelector('.method-opt[value="' + suggestion.method + '"]');
+          if (opt) opt.checked = true;
+          if (suggestion.platformSlug) {
+            var platformSelect = tr.querySelector('.f-platform');
+            var popt = platformSelect.querySelector('option[data-slug="' + suggestion.platformSlug + '"]');
+            if (popt) platformSelect.value = popt.value;
+          }
+        }
+      }
+    }
+
+    function closeEditorAndMaybeSave() {
+      var newValue = computeMethodValue(editorEl);
+      editorEl.style.display = 'none';
+      viewEl.style.display = '';
+      if (newValue !== hiddenInput.value) {
+        hiddenInput.value = newValue;
+        renderMethodView(viewEl, newValue);
+        saveRow(tr);
+      }
+    }
+
+    viewEl.addEventListener('click', function (e) {
+      if (e.target.classList.contains('chip-x')) {
+        // Remove só esse protocolo, sem abrir o checklist inteiro.
+        e.stopPropagation();
+        var proto = e.target.dataset.proto;
+        var current = hiddenInput.value;
+        var newValue = current === 'both' ? (proto === 'ssh' ? 'snmp' : 'ssh') : (current === proto ? '' : current);
+        if (newValue !== current) {
+          hiddenInput.value = newValue;
+          var cb = editorEl.querySelector('.method-opt[value="' + proto + '"]');
+          if (cb) cb.checked = false;
+          renderMethodView(viewEl, newValue);
+          saveRow(tr);
+        }
+        return;
+      }
+      openEditor();
+    });
+    viewEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditor(); }
+    });
+
+    editorEl.addEventListener('focusout', function (e) {
+      // Só fecha/salva quando o foco sai do editor inteiro -- não entre
+      // um checkbox e o outro dele mesmo.
+      if (editorEl.contains(e.relatedTarget)) return;
+      closeEditorAndMaybeSave();
+    });
+    editorEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        var savedList = hiddenInput.value ? (hiddenInput.value === 'both' ? ['ssh', 'snmp'] : [hiddenInput.value]) : [];
+        editorEl.querySelectorAll('.method-opt').forEach(function (cb) {
+          cb.checked = savedList.indexOf(cb.value) !== -1;
+        });
+        editorEl.style.display = 'none';
+        viewEl.style.display = '';
+      }
+      if (e.key === 'Enter') { closeEditorAndMaybeSave(); }
+    });
+  }
+
   rows.forEach(function (tr) {
     var siteSelect = tr.querySelector('.f-site');
     var regionVal = tr.querySelector('.region-val');
@@ -435,7 +545,10 @@
         regionVal.textContent = (opt && opt.dataset.region) ? opt.dataset.region : '—';
       });
     }
-    tr.querySelectorAll('td').forEach(function (td) { wireCell(td, tr); });
+    tr.querySelectorAll('td').forEach(function (td) {
+      if (td.classList.contains('method-cell')) { wireMethodCell(td, tr); return; }
+      wireCell(td, tr);
+    });
   });
 })();
 </script>

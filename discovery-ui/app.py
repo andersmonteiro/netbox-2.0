@@ -322,6 +322,9 @@ def dashboard():
             "platform": _display_case(str(d.platform)) if d.platform else None,
             "platform_id": d.platform.id if d.platform else None,
             "method": method,
+            # Lista pra montar os "chips" (SSH / SNMP) no dashboard --
+            # method="both" vira os dois chips, "ssh"/"snmp" vira um só.
+            "method_list": (["ssh", "snmp"] if method == "both" else [method] if method else []),
             "has_cred": has_cred,
             "has_ssh_cred": has_ssh_cred,
             # Platform (driver NAPALM) só é obrigatório quando o método
@@ -485,8 +488,15 @@ def _apply_discovery_form(nb, device, form):
         except ValueError:
             ssh_port = None
 
-    method = form.get("method")
-    if method:
+    # "method" in form (não só truthy) porque o widget de chips do
+    # dashboard manda method="" de propósito quando o operador remove
+    # todos os protocolos (os dois "x") -- precisa chegar até aqui pra
+    # limpar discovery_method de verdade no NetBox, não só ignorar. Os
+    # outros formulários (cadastro/edição de device) simplesmente não
+    # mandam esse campo quando não se aplica, então o "in" não muda nada
+    # pra eles.
+    if "method" in form:
+        method = form.get("method") or None
         core.set_discovery_fields(
             device, method,
             discovery_username=form.get("discovery_username") or None,
