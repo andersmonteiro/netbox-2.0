@@ -2,6 +2,15 @@ flask>=3.0,<4
 gunicorn>=22.0
 pynetbox>=7.4,<8
 napalm>=5.0
+# Driver comunitário -- "huawei_vrp" não vem embutido no napalm core (só
+# eos/ios/iosxr/junos/nxos/nxos_ssh vêm de fábrica). Necessário aqui (não
+# só em automation-scripts/) porque é o discovery-ui/app.py (rodando
+# dentro do container netbox-oracle) que executa a coleta SSH de verdade
+# quando o operador usa a interface web -- sem isso, collect_ssh() falha
+# com "driver NAPALM 'huawei_vrp' inválido" pra qualquer device Huawei,
+# mesmo com o Fabricante resolvendo certo (ver
+# discovery_core.resolve_platform_slug()).
+napalm-huawei-vrp>=1.0
 # Usado pra uma consulta SSH extra e opcional em devices MikroTik
 # descobertos via SNMP -- RouterOS não expõe o vínculo VLAN -> porta
 # física por SNMP de leitura simples, então lemos via CLI quando o

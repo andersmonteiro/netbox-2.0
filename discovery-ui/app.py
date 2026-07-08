@@ -221,21 +221,7 @@ def api_status():
 # dashboard
 # --------------------------------------------------------------------
 
-@app.route("/")
-@login_required
-def dashboard():
-    try:
-        nb = get_nb()
-        devices = sorted(nb.dcim.devices.all(), key=lambda d: d.name or "")
-    except Exception as exc:
-        flash(f"Erro ao consultar o NetBox: {exc}", "error")
-        devices = []
-
-    try:
-        platforms = list(nb.dcim.platforms.all())
-    except Exception:
-        platforms = []
-
+def _load_sites(nb):
     try:
         sites_raw = list(nb.dcim.sites.all())
     except Exception:
@@ -250,7 +236,10 @@ def dashboard():
             s_region = ""
         sites.append({"id": s.id, "name": _display_case(s.name), "region": s_region})
     sites.sort(key=lambda x: x["name"].lower())
+    return sites
 
+
+def _load_device_types(nb):
     try:
         device_types_raw = list(nb.dcim.device_types.all())
     except Exception:
@@ -267,73 +256,106 @@ def dashboard():
         label = f"{manuf} — {model}" if manuf else model
         device_types.append({"id": dt.id, "label": label, "manufacturer": manuf})
     device_types.sort(key=lambda x: x["label"].lower())
+    return device_types
 
-    rows = []
-    for d in devices:
-        cf = d.custom_fields or {}
-        method = cf.get("discovery_method")
-        has_ssh_cred_pair = bool(cf.get("discovery_username") and cf.get("discovery_password"))
-        has_community = bool(cf.get("discovery_snmp_community"))
-        if method == "ssh":
-            has_cred = has_ssh_cred_pair
-        elif method == "snmp":
-            has_cred = has_community
-        elif method == "both":
-            # "both" precisa das DUAS credenciais -- SSH (NAPALM) e SNMP
-            # rodam juntos e os resultados são cruzados por interface (ver
-            # discovery_core.collect_both()).
-            has_cred = has_ssh_cred_pair and has_community
-        else:
-            has_cred = False
-        # Independente do método -- usado só pra mostrar "definida"/"—" na
-        # célula de Senha (SSH), que agora também serve pro extra opcional
-        # de MikroTik em devices configurados como SNMP (ver allow_ssh_cred
-        # no dashboard.html). Não entra no cálculo de "ready" isolado: a
-        # checagem extra do MikroTik é opcional, não bloqueia a descoberta
-        # principal -- mas pra method="both" ela É obrigatória (embutida
-        # no has_cred acima).
-        has_ssh_cred = has_ssh_cred_pair
-        site = _display_case(str(d.site)) if d.site else ""
+
+def _build_row(d):
+    """Monta o dict usado pela linha do device no dashboard (e reaproveitado
+    pelo endpoint /device/<id>/row, que devolve o HTML de UMA linha só pra
+    atualizar em vez de recarregar a página inteira -- ver comentário em
+    device_row())."""
+    cf = d.custom_fields or {}
+    method = cf.get("discovery_method")
+    has_ssh_cred_pair = bool(cf.get("discovery_username") and cf.get("discovery_password"))
+    has_community = bool(cf.get("discovery_snmp_community"))
+    if method == "ssh":
+        has_cred = has_ssh_cred_pair
+    elif method == "snmp":
+        has_cred = has_community
+    elif method == "both":
+        # "both" precisa das DUAS credenciais -- SSH (NAPALM) e SNMP
+        # rodam juntos e os resultados são cruzados por interface (ver
+        # discovery_core.collect_both()).
+        has_cred = has_ssh_cred_pair and has_community
+    else:
+        has_cred = False
+    # Independente do método -- usado só pra mostrar "definida"/"—" na
+    # célula de Senha (SSH), que agora também serve pro extra opcional
+    # de MikroTik em devices configurados como SNMP. Não entra no
+    # cálculo de "ready" isolado: a checagem extra do MikroTik é
+    # opcional, não bloqueia a descoberta principal -- mas pra
+    # method="both" ela É obrigatória (embutida no has_cred acima).
+    has_ssh_cred = has_ssh_cred_pair
+    site = _display_case(str(d.site)) if d.site else ""
+    region = ""
+    try:
+        if d.site and getattr(d.site, "region", None):
+            region = _display_case(str(d.site.region))
+    except Exception:
         region = ""
-        try:
-            if d.site and getattr(d.site, "region", None):
-                region = _display_case(str(d.site.region))
-        except Exception:
-            region = ""
-        manufacturer = ""
-        device_type_model = ""
-        try:
-            if d.device_type:
-                device_type_model = _display_case(str(d.device_type))
-                if getattr(d.device_type, "manufacturer", None):
-                    manufacturer = _display_case(str(d.device_type.manufacturer))
-        except Exception:
-            pass
-        rows.append({
-            "id": d.id,
-            "name": d.name,
-            "site": site,
-            "site_id": d.site.id if d.site else None,
-            "region": region,
-            "manufacturer": manufacturer,
-            "device_type_model": device_type_model,
-            "device_type_id": d.device_type.id if d.device_type else None,
-            "primary_ip": str(d.primary_ip4).split("/")[0] if d.primary_ip4 else None,
-            "platform": _display_case(str(d.platform)) if d.platform else None,
-            "platform_id": d.platform.id if d.platform else None,
-            "method": method,
-            # Lista pra montar os "chips" (SSH / SNMP) no dashboard --
-            # method="both" vira os dois chips, "ssh"/"snmp" vira um só.
-            "method_list": (["ssh", "snmp"] if method == "both" else [method] if method else []),
-            "has_cred": has_cred,
-            "has_ssh_cred": has_ssh_cred,
-            # Platform (driver NAPALM) só é obrigatório quando o método
-            # envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
-            "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or d.platform)),
-            "cf_username": cf.get("discovery_username") or "",
-            "cf_ssh_port": cf.get("discovery_ssh_port") or "",
-            "cf_snmp_community": cf.get("discovery_snmp_community") or "",
-        })
+    manufacturer = ""
+    device_type_model = ""
+    try:
+        if d.device_type:
+            device_type_model = _display_case(str(d.device_type))
+            if getattr(d.device_type, "manufacturer", None):
+                manufacturer = _display_case(str(d.device_type.manufacturer))
+    except Exception:
+        pass
+    # Platform (driver NAPALM) não é mais um campo que o operador precisa
+    # escolher no dashboard -- é resolvido automaticamente a partir do
+    # Fabricante (ver discovery_core.resolve_platform_slug(), mesma regra
+    # usada em collect_ssh()). Se o device já tiver uma Platform explícita
+    # no NetBox, ela continua valendo (permite override manual); senão,
+    # só conta como "pronto" pra SSH/both se o Fabricante for reconhecido.
+    platform_resolved = bool(d.platform) or bool(core.resolve_platform_slug(manufacturer, device_type_model))
+    return {
+        "id": d.id,
+        "name": d.name,
+        "site": site,
+        "site_id": d.site.id if d.site else None,
+        "region": region,
+        "manufacturer": manufacturer,
+        "device_type_model": device_type_model,
+        "device_type_id": d.device_type.id if d.device_type else None,
+        "primary_ip": str(d.primary_ip4).split("/")[0] if d.primary_ip4 else None,
+        "platform": _display_case(str(d.platform)) if d.platform else None,
+        "platform_id": d.platform.id if d.platform else None,
+        "method": method,
+        # Lista pra montar os "chips" (SSH / SNMP) no dashboard --
+        # method="both" vira os dois chips, "ssh"/"snmp" vira um só.
+        "method_list": (["ssh", "snmp"] if method == "both" else [method] if method else []),
+        "has_cred": has_cred,
+        "has_ssh_cred": has_ssh_cred,
+        # Platform (driver NAPALM) só é obrigatório quando o método
+        # envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
+        "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or platform_resolved)),
+        "cf_username": cf.get("discovery_username") or "",
+        "cf_ssh_port": cf.get("discovery_ssh_port") or "",
+        "cf_snmp_community": cf.get("discovery_snmp_community") or "",
+    }
+
+
+@app.route("/")
+@login_required
+def dashboard():
+    try:
+        nb = get_nb()
+        devices = sorted(nb.dcim.devices.all(), key=lambda d: d.name or "")
+    except Exception as exc:
+        flash(f"Erro ao consultar o NetBox: {exc}", "error")
+        devices = []
+        nb = None
+
+    try:
+        platforms = list(nb.dcim.platforms.all()) if nb else []
+    except Exception:
+        platforms = []
+
+    sites = _load_sites(nb) if nb else []
+    device_types = _load_device_types(nb) if nb else []
+
+    rows = [_build_row(d) for d in devices]
 
     pending_count = len(list(OUTPUT_DIR.glob("*.json"))) if OUTPUT_DIR.exists() else 0
 
@@ -450,6 +472,26 @@ def device_inline_update(device_id):
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}, 400
+
+
+@app.route("/device/<int:device_id>/row")
+@login_required
+def device_row(device_id):
+    """Devolve o HTML de UMA linha só do dashboard (mesmo template usado
+    dentro do loop de dashboard.html) -- chamado pelo JS depois de salvar
+    uma edição inline, pra atualizar só aquela linha (checkbox "pronto"/
+    Status, e o que mais tiver mudado) sem recarregar a página inteira e
+    perder o scroll/estado de edição das outras linhas."""
+    nb = get_nb()
+    device = nb.dcim.devices.get(device_id)
+    if not device:
+        return "", 404
+    row = _build_row(device)
+    return render_template(
+        "_device_row.html", r=row,
+        sites=_load_sites(nb), device_types=_load_device_types(nb),
+        platforms=list(nb.dcim.platforms.all()),
+    )
 
 
 def _apply_discovery_form(nb, device, form):

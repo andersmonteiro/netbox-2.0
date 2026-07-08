@@ -259,17 +259,74 @@ def collect_mikrotik_interface_details(host, username, password, port=None):
 # --------------------------------------------------------------------
 # SSH / NAPALM
 # --------------------------------------------------------------------
+# Resolve o driver NAPALM a partir do Fabricante (Device Type > Manufacturer)
+# em vez de exigir que o operador escolha a Platform manualmente pra cada
+# device -- mesma tabela de regras usada pela sugestão automática no
+# dashboard (MANUFACTURER_RULES, dashboard.html), só que aqui do lado do
+# servidor, pra funcionar mesmo sem a Platform setada no NetBox. Se o
+# device já tiver uma Platform explícita, ela continua tendo prioridade
+# (permite override manual pra casos fora do padrão).
+# --------------------------------------------------------------------
+_MANUFACTURER_PLATFORM_RULES = [
+    (re.compile(r"cisco", re.I), "ios"),
+    (re.compile(r"juniper", re.I), "junos"),
+    (re.compile(r"arista", re.I), "eos"),
+    (re.compile(r"palo\s*alto", re.I), "panos"),
+    (re.compile(r"huawei", re.I), "huawei_vrp"),
+]
+_OLT_PATTERN = re.compile(r"\bolt\b|ma5\d{3}", re.I)
+
+
+def resolve_platform_slug(manufacturer, device_type_model=None):
+    """Adivinha o slug do driver NAPALM a partir do nome do Fabricante.
+    Retorna None se não reconhecer o fabricante, ou se for um Huawei tipo
+    OLT (esses não têm driver NAPALM confiável -- usam SNMP, ver
+    MANUFACTURER_RULES/oltCheck em dashboard.html, mesma lógica)."""
+    manufacturer = manufacturer or ""
+    for pattern, slug in _MANUFACTURER_PLATFORM_RULES:
+        if pattern.search(manufacturer):
+            if slug == "huawei_vrp" and _OLT_PATTERN.search(device_type_model or ""):
+                return None
+            return slug
+    return None
+
+
+def _device_manufacturer_info(device):
+    """(manufacturer, device_type_model) como string, best-effort -- usado
+    só pra alimentar resolve_platform_slug()."""
+    manufacturer = None
+    device_type_model = None
+    try:
+        if device.device_type:
+            device_type_model = str(device.device_type)
+            if getattr(device.device_type, "manufacturer", None):
+                manufacturer = str(device.device_type.manufacturer)
+    except Exception:
+        pass
+    return manufacturer, device_type_model
+
 
 def collect_ssh(device, username, password, port=None):
     from napalm import get_network_driver  # import tardio: só quem usar SSH precisa do napalm
 
-    if not device.platform:
-        return {"method": "ssh", "errors": ["sem 'platform' definido (driver NAPALM)"]}
+    driver_name = device.platform.slug if device.platform else None
+    if not driver_name:
+        manufacturer, device_type_model = _device_manufacturer_info(device)
+        driver_name = resolve_platform_slug(manufacturer, device_type_model)
+    if not driver_name:
+        return {
+            "method": "ssh",
+            "errors": [
+                "não consegui adivinhar o driver NAPALM pelo Fabricante -- "
+                "confirme se o Device Type tem um Fabricante reconhecido "
+                "(Cisco/Juniper/Arista/Palo Alto/Huawei) ou defina a "
+                "Platform manualmente no device (NetBox > Devices > editar)"
+            ],
+        }
     if not device.primary_ip4:
         return {"method": "ssh", "errors": ["sem IP de gerência (primary_ip4)"]}
 
     host = str(device.primary_ip4).split("/")[0]
-    driver_name = device.platform.slug
     data = {"method": "ssh", "host": host, "errors": []}
 
     try:

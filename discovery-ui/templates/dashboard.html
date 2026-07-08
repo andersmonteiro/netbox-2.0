@@ -72,8 +72,7 @@
             <th>Região <i class="ti ti-info-circle text-secondary" title="Vem do Site escolhido -- não é editável direto aqui"></i></th>
             <th>Fabricante <i class="ti ti-info-circle text-secondary" title="Fabricante e modelo do device (Device Type)"></i></th>
             <th>IP de gerência <i class="ti ti-info-circle text-secondary" title="IP usado pra conectar e coletar dados do device"></i></th>
-            <th>Platform <i class="ti ti-info-circle text-secondary" title="Driver NAPALM, necessário pra descoberta via SSH ou SSH + SNMP"></i></th>
-            <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH (NAPALM), SNMP, ou os dois juntos (roda os dois e cruza o resultado por interface -- útil quando um método sozinho não traz tudo)"></i></th>
+            <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH (NAPALM), SNMP, ou os dois juntos (roda os dois e cruza o resultado por interface -- útil quando um método sozinho não traz tudo). O driver NAPALM pra SSH é resolvido automaticamente pelo Fabricante -- não precisa escolher Platform manualmente"></i></th>
             <th>Usuário (SSH) <i class="ti ti-info-circle text-secondary" title="Usuário de login SSH. Em MikroTik configurado como SNMP, é opcional -- só usado pra confirmar o vínculo VLAN/porta física e o comentário real da interface"></i></th>
             <th>Senha (SSH) <i class="ti ti-info-circle text-secondary" title="Senha de login SSH -- nunca é exibida, só substituída. Em MikroTik configurado como SNMP, é opcional"></i></th>
             <th>Porta SSH <i class="ti ti-info-circle text-secondary" title="Padrão 22 se deixar em branco"></i></th>
@@ -83,117 +82,7 @@
         </thead>
         <tbody>
           {% for r in rows %}
-          <tr
-            class="dev-row"
-            data-id="{{ r.id }}"
-            data-name="{{ r.name|lower }}"
-            data-ip="{{ (r.primary_ip or '')|lower }}"
-            data-site="{{ r.site }}"
-            data-region="{{ r.region }}"
-            data-manufacturer="{{ r.manufacturer }}"
-            data-device-type-model="{{ r.device_type_model }}"
-          >
-            <td>
-              <input
-                type="checkbox" class="form-check-input m-0 dev-cb" name="device_ids" value="{{ r.id }}"
-                {% if not r.ready %}disabled title="Configure o método de descoberta antes (clique nos campos da linha pra editar)"{% endif %}
-              >
-            </td>
-            <td>
-              <span class="view-val click-edit" tabindex="0">{{ r.name }}</span>
-              <input type="text" class="edit-val form-control form-control-sm" value="{{ r.name }}" style="display:none">
-            </td>
-            <td>
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ r.site or "—" }}</span>
-              <select class="edit-val form-select form-select-sm f-site" style="display:none">
-                <option value="">— selecione —</option>
-                {% for s in sites %}
-                <option value="{{ s.id }}" data-region="{{ s.region }}" {% if r.site_id == s.id %}selected{% endif %}>{{ s.name }}</option>
-                {% endfor %}
-              </select>
-            </td>
-            <td>
-              <span class="region-val text-secondary">{{ r.region or "—" }}</span>
-            </td>
-            <td>
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ r.manufacturer or "—" }}</span>
-              <select class="edit-val form-select form-select-sm" style="display:none">
-                <option value="">— selecione —</option>
-                {% for dt in device_types %}
-                <option value="{{ dt.id }}" data-manufacturer="{{ dt.manufacturer }}" {% if r.device_type_id == dt.id %}selected{% endif %}>{{ dt.label }}</option>
-                {% endfor %}
-              </select>
-            </td>
-            <td>
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ r.primary_ip or "—" }}</span>
-              <input type="text" class="edit-val form-control form-control-sm" value="{{ r.primary_ip or '' }}" style="display:none" placeholder="ex: 10.0.0.1">
-            </td>
-            <td>
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ r.platform or "—" }}</span>
-              <select class="edit-val form-select form-select-sm f-platform" style="display:none">
-                <option value="">— selecione —</option>
-                {% for p in platforms %}
-                <option value="{{ p.id }}" data-slug="{{ p.slug }}" {% if r.platform_id == p.id %}selected{% endif %}>{{ p.name }}</option>
-                {% endfor %}
-              </select>
-            </td>
-            <td class="method-cell">
-              <span class="method-view" tabindex="0">
-                {% if 'ssh' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SSH<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span></span>{% endif %}
-                {% if 'snmp' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SNMP<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span></span>{% endif %}
-                {% if not r.method_list %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
-              </span>
-              <div class="method-editor" style="display:none">
-                <label class="form-check mb-1"><input type="checkbox" class="form-check-input method-opt" value="ssh" {% if 'ssh' in r.method_list %}checked{% endif %}> SSH (NAPALM)</label>
-                <label class="form-check mb-0"><input type="checkbox" class="form-check-input method-opt" value="snmp" {% if 'snmp' in r.method_list %}checked{% endif %}> SNMP</label>
-              </div>
-              <input type="hidden" class="f-method" value="{{ r.method or '' }}">
-            </td>
-            {% set allow_ssh_cred = r.method in ('ssh', 'both') or (r.method == 'snmp' and 'mikrotik' in (r.manufacturer or '')|lower) %}
-            <td>
-              {% if allow_ssh_cred %}
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_username or "—" }}</span>
-              <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_username }}" style="display:none" autocomplete="off">
-              {% else %}
-              <span class="text-secondary">—</span>
-              <input type="hidden" class="edit-val" value="{{ r.cf_username }}">
-              {% endif %}
-            </td>
-            <td>
-              {% if allow_ssh_cred %}
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ "definida" if r.has_ssh_cred else "—" }}</span>
-              <input type="password" class="edit-val form-control form-control-sm" style="display:none" placeholder="deixe em branco pra manter" autocomplete="new-password">
-              {% else %}
-              <span class="text-secondary">—</span>
-              <input type="hidden" class="edit-val" value="">
-              {% endif %}
-            </td>
-            <td>
-              {% if allow_ssh_cred %}
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_ssh_port or "22" }}</span>
-              <input type="number" class="edit-val form-control form-control-sm" value="{{ r.cf_ssh_port }}" style="display:none" placeholder="22">
-              {% else %}
-              <span class="text-secondary">—</span>
-              <input type="hidden" class="edit-val" value="{{ r.cf_ssh_port }}">
-              {% endif %}
-            </td>
-            <td>
-              {% if r.method in ('snmp', 'both') %}
-              <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_snmp_community or "—" }}</span>
-              <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_snmp_community }}" style="display:none" autocomplete="off">
-              {% else %}
-              <span class="text-secondary">—</span>
-              <input type="hidden" class="edit-val" value="{{ r.cf_snmp_community }}">
-              {% endif %}
-            </td>
-            <td>
-              {% if r.ready %}
-                <span class="badge bg-success-lt text-uppercase"><i class="ti ti-circle-check me-1"></i>pronto</span>
-              {% else %}
-                <span class="badge bg-red-lt text-uppercase"><i class="ti ti-circle-x me-1"></i>incompleto</span>
-              {% endif %}
-            </td>
-          </tr>
+          {% include "_device_row.html" %}
           {% endfor %}
         </tbody>
       </table>
@@ -335,18 +224,16 @@
     var siteEl = tr.querySelector('.f-site');
     var deviceTypeEl = tr.querySelector('td:nth-child(5) .edit-val');
     var ipEl = tr.querySelector('td:nth-child(6) .edit-val');
-    var platformEl = tr.querySelector('.f-platform');
     var methodEl = tr.querySelector('.f-method');
-    var usernameEl = tr.querySelector('td:nth-child(9) .edit-val');
-    var passwordEl = tr.querySelector('td:nth-child(10) .edit-val');
-    var sshPortEl = tr.querySelector('td:nth-child(11) .edit-val');
-    var communityEl = tr.querySelector('td:nth-child(12) .edit-val');
+    var usernameEl = tr.querySelector('td:nth-child(8) .edit-val');
+    var passwordEl = tr.querySelector('td:nth-child(9) .edit-val');
+    var sshPortEl = tr.querySelector('td:nth-child(10) .edit-val');
+    var communityEl = tr.querySelector('td:nth-child(11) .edit-val');
 
     data.set('name', (nameEl.value || '').trim());
     data.set('site_id', siteEl.value);
     data.set('device_type_id', deviceTypeEl.value);
     data.set('primary_ip', (ipEl.value || '').trim());
-    data.set('platform_id', platformEl.value);
     data.set('method', methodEl.value);
     data.set('discovery_username', (usernameEl.value || '').trim());
     data.set('discovery_password', passwordEl.type === 'password' ? passwordEl.value : '');
@@ -363,7 +250,16 @@
       .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, body: j }; }); })
       .then(function (res) {
         if (res.ok && res.body.ok) {
-          window.location.reload();
+          // Só busca o HTML dessa linha de novo e troca ELA, em vez de dar
+          // reload na página inteira -- preserva o scroll e o estado de
+          // edição das outras linhas. Necessário (não só atualizar o texto
+          // localmente) porque mudar o Método pode revelar/esconder outras
+          // células (Usuário/Senha SSH, Community) que só o servidor sabe
+          // calcular certo (ver allow_ssh_cred em _device_row.html).
+          return fetch('/device/' + id + '/row')
+            .then(function (r) { return r.text(); })
+            .then(function (html) { replaceRow(tr, html); })
+            .catch(function () { window.location.reload(); });
         } else {
           saveError.textContent = 'Erro ao salvar ' + tr.dataset.name + ': ' + (res.body.error || 'falha desconhecida');
           saveError.style.display = '';
@@ -373,6 +269,22 @@
         saveError.textContent = 'Erro de rede ao salvar ' + tr.dataset.name + ': ' + err;
         saveError.style.display = '';
       });
+  }
+
+  function parseRowHtml(html) {
+    var tbody = document.createElement('tbody');
+    tbody.innerHTML = html.trim();
+    return tbody.querySelector('tr');
+  }
+
+  function replaceRow(tr, html) {
+    var newTr = parseRowHtml(html);
+    if (!newTr || !tr.parentNode) return tr;
+    tr.parentNode.replaceChild(newTr, tr);
+    var idx = rows.indexOf(tr);
+    if (idx !== -1) rows[idx] = newTr;
+    wireRow(newTr);
+    return newTr;
   }
 
   function wireCell(td, tr) {
@@ -469,17 +381,15 @@
       editorEl.style.display = '';
       var first = editorEl.querySelector('.method-opt');
       if (first) first.focus();
-      // Sugestão automática só se ainda não tem nada configurado.
+      // Sugestão automática só se ainda não tem nada configurado. O
+      // driver NAPALM (Platform) não é mais escolhido aqui -- é resolvido
+      // sozinho a partir do Fabricante do lado do servidor (ver
+      // discovery_core.resolve_platform_slug()).
       if (!hiddenInput.value) {
         var suggestion = suggestFor(tr.dataset.manufacturer, tr.dataset.deviceTypeModel);
         if (suggestion) {
           var opt = editorEl.querySelector('.method-opt[value="' + suggestion.method + '"]');
           if (opt) opt.checked = true;
-          if (suggestion.platformSlug) {
-            var platformSelect = tr.querySelector('.f-platform');
-            var popt = platformSelect.querySelector('option[data-slug="' + suggestion.platformSlug + '"]');
-            if (popt) platformSelect.value = popt.value;
-          }
         }
       }
     }
@@ -536,7 +446,7 @@
     });
   }
 
-  rows.forEach(function (tr) {
+  function wireRow(tr) {
     var siteSelect = tr.querySelector('.f-site');
     var regionVal = tr.querySelector('.region-val');
     if (siteSelect) {
@@ -549,7 +459,9 @@
       if (td.classList.contains('method-cell')) { wireMethodCell(td, tr); return; }
       wireCell(td, tr);
     });
-  });
+  }
+
+  rows.forEach(wireRow);
 })();
 </script>
 {% endif %}

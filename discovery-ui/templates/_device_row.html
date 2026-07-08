@@ -1,0 +1,109 @@
+{# Uma linha da tabela de devices do dashboard -- extraído pra template
+   próprio (em vez de ficar só inline em dashboard.html) porque também é
+   renderizado sozinho pelo endpoint /device/<id>/row, chamado pelo JS
+   depois de uma edição inline pra atualizar só aquela linha sem recarregar
+   a página inteira (ver saveRow() em dashboard.html). Espera as mesmas
+   variáveis de contexto que dashboard.html já tem: r, sites, device_types,
+   platforms. #}
+<tr
+  class="dev-row"
+  data-id="{{ r.id }}"
+  data-name="{{ r.name|lower }}"
+  data-ip="{{ (r.primary_ip or '')|lower }}"
+  data-site="{{ r.site }}"
+  data-region="{{ r.region }}"
+  data-manufacturer="{{ r.manufacturer }}"
+  data-device-type-model="{{ r.device_type_model }}"
+>
+  <td>
+    <input
+      type="checkbox" class="form-check-input m-0 dev-cb" name="device_ids" value="{{ r.id }}"
+      {% if not r.ready %}disabled title="Configure o método de descoberta antes (clique nos campos da linha pra editar)"{% endif %}
+    >
+  </td>
+  <td>
+    <span class="view-val click-edit" tabindex="0">{{ r.name }}</span>
+    <input type="text" class="edit-val form-control form-control-sm" value="{{ r.name }}" style="display:none">
+  </td>
+  <td>
+    <span class="view-val click-edit text-secondary" tabindex="0">{{ r.site or "—" }}</span>
+    <select class="edit-val form-select form-select-sm f-site" style="display:none">
+      <option value="">— selecione —</option>
+      {% for s in sites %}
+      <option value="{{ s.id }}" data-region="{{ s.region }}" {% if r.site_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td>
+    <span class="region-val text-secondary">{{ r.region or "—" }}</span>
+  </td>
+  <td>
+    <span class="view-val click-edit text-secondary" tabindex="0">{{ r.manufacturer or "—" }}</span>
+    <select class="edit-val form-select form-select-sm" style="display:none">
+      <option value="">— selecione —</option>
+      {% for dt in device_types %}
+      <option value="{{ dt.id }}" data-manufacturer="{{ dt.manufacturer }}" {% if r.device_type_id == dt.id %}selected{% endif %}>{{ dt.label }}</option>
+      {% endfor %}
+    </select>
+  </td>
+  <td>
+    <span class="view-val click-edit text-secondary" tabindex="0">{{ r.primary_ip or "—" }}</span>
+    <input type="text" class="edit-val form-control form-control-sm" value="{{ r.primary_ip or '' }}" style="display:none" placeholder="ex: 10.0.0.1">
+  </td>
+  <td class="method-cell">
+    <span class="method-view" tabindex="0">
+      {% if 'ssh' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SSH<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span></span>{% endif %}
+      {% if 'snmp' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SNMP<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span></span>{% endif %}
+      {% if not r.method_list %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
+    </span>
+    <div class="method-editor" style="display:none">
+      <label class="form-check mb-1"><input type="checkbox" class="form-check-input method-opt" value="ssh" {% if 'ssh' in r.method_list %}checked{% endif %}> SSH (NAPALM)</label>
+      <label class="form-check mb-0"><input type="checkbox" class="form-check-input method-opt" value="snmp" {% if 'snmp' in r.method_list %}checked{% endif %}> SNMP</label>
+    </div>
+    <input type="hidden" class="f-method" value="{{ r.method or '' }}">
+  </td>
+  {% set allow_ssh_cred = r.method in ('ssh', 'both') or (r.method == 'snmp' and 'mikrotik' in (r.manufacturer or '')|lower) %}
+  <td>
+    {% if allow_ssh_cred %}
+    <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_username or "—" }}</span>
+    <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_username }}" style="display:none" autocomplete="off">
+    {% else %}
+    <span class="text-secondary">—</span>
+    <input type="hidden" class="edit-val" value="{{ r.cf_username }}">
+    {% endif %}
+  </td>
+  <td>
+    {% if allow_ssh_cred %}
+    <span class="view-val click-edit text-secondary" tabindex="0">{{ "definida" if r.has_ssh_cred else "—" }}</span>
+    <input type="password" class="edit-val form-control form-control-sm" style="display:none" placeholder="deixe em branco pra manter" autocomplete="new-password">
+    {% else %}
+    <span class="text-secondary">—</span>
+    <input type="hidden" class="edit-val" value="">
+    {% endif %}
+  </td>
+  <td>
+    {% if allow_ssh_cred %}
+    <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_ssh_port or "22" }}</span>
+    <input type="number" class="edit-val form-control form-control-sm" value="{{ r.cf_ssh_port }}" style="display:none" placeholder="22">
+    {% else %}
+    <span class="text-secondary">—</span>
+    <input type="hidden" class="edit-val" value="{{ r.cf_ssh_port }}">
+    {% endif %}
+  </td>
+  <td>
+    {% if r.method in ('snmp', 'both') %}
+    <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_snmp_community or "—" }}</span>
+    <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_snmp_community }}" style="display:none" autocomplete="off">
+    {% else %}
+    <span class="text-secondary">—</span>
+    <input type="hidden" class="edit-val" value="{{ r.cf_snmp_community }}">
+    {% endif %}
+  </td>
+  <td>
+    {% if r.ready %}
+      <span class="badge bg-success-lt text-uppercase"><i class="ti ti-circle-check me-1"></i>pronto</span>
+    {% else %}
+      <span class="badge bg-red-lt text-uppercase"><i class="ti ti-circle-x me-1"></i>incompleto</span>
+    {% endif %}
+  </td>
+</tr>
