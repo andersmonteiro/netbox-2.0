@@ -314,6 +314,76 @@ def collect_ssh(device, username, password, port=None):
     return data
 
 
+def _merge_interface(snmp_if, ssh_if):
+    """Combina os dados de uma mesma interface vindos de SNMP e de SSH/
+    NAPALM (método 'both') -- o driver NAPALM costuma trazer descrição,
+    MAC e status mais confiáveis (lido direto do fabricante, sem depender
+    de OID padrão), então tem prioridade quando o SSH trouxe algo; o que
+    o SSH não trouxe (ou se o SSH falhou nessa interface específica)
+    continua vindo do SNMP, que serve de rede de segurança."""
+    base = dict(snmp_if or ssh_if or {})
+    for key in ("descr", "admin_status", "oper_status", "mac_address"):
+        ssh_val = (ssh_if or {}).get(key)
+        if ssh_val:
+            base[key] = ssh_val
+    return base
+
+
+def collect_both(device, credentials, snmp_timeout=5, snmp_retries=1):
+    """Roda SSH (NAPALM) e SNMP na MESMA coleta e cruza os resultados por
+    interface -- pensado pra device onde nenhum dos dois métodos sozinho
+    é suficiente (ex: um fabricante cujo driver NAPALM não traz certos
+    campos mas o SNMP traz, ou vice-versa). Cada protocolo roda de forma
+    independente e best-effort: se um falhar (ex: MikroTik não tem driver
+    NAPALM oficial), a coleta segue com o que o outro trouxe em vez de
+    falhar tudo -- os erros de ambos ficam registrados em 'errors' pro
+    operador ver o que não funcionou."""
+    username = credentials.get("discovery_username")
+    password = credentials.get("discovery_password")
+    port = credentials.get("discovery_ssh_port")
+    community = credentials.get("discovery_snmp_community")
+
+    missing = []
+    if not username or not password:
+        missing.append("usuário/senha (SSH)")
+    if not community:
+        missing.append("community (SNMP)")
+    if missing:
+        return {"method": "both", "errors": [f"falta {' e '.join(missing)}"]}
+
+    ssh_data = collect_ssh(device, username, password, port=port)
+    snmp_data = collect_snmp(
+        device, community, timeout=snmp_timeout, retries=snmp_retries,
+        ssh_username=username, ssh_password=password, ssh_port=port,
+    )
+
+    data = {
+        "method": "both",
+        "host": snmp_data.get("host") or ssh_data.get("host"),
+        "errors": list(ssh_data.get("errors") or []) + list(snmp_data.get("errors") or []),
+        "sys_name": snmp_data.get("sys_name"),
+        "sys_descr": snmp_data.get("sys_descr"),
+        "serial": ssh_data.get("serial"),
+        "os_version": ssh_data.get("os_version"),
+    }
+
+    ssh_by_norm = {normalize_ifname(i["name"]): i for i in ssh_data.get("interfaces", []) if i.get("name")}
+    snmp_by_norm = {normalize_ifname(i["name"]): i for i in snmp_data.get("interfaces", []) if i.get("name")}
+
+    interfaces = []
+    for norm in set(ssh_by_norm) | set(snmp_by_norm):
+        snmp_if = snmp_by_norm.get(norm)
+        ssh_if = ssh_by_norm.get(norm)
+        # Nome "oficial" prioriza o que veio do SNMP (ifName/ifDescr) --
+        # só usa o nome do SSH se essa interface não apareceu no SNMP.
+        merged = _merge_interface(snmp_if, ssh_if)
+        merged["name"] = (snmp_if or ssh_if)["name"]
+        interfaces.append(merged)
+
+    data["interfaces"] = interfaces
+    return data
+
+
 def collect_device(device, method, credentials, snmp_timeout=5, snmp_retries=1):
     """Ponto de entrada único: despacha pro coletor certo a partir do
     'discovery_method' + dict de credenciais (mesmas chaves dos custom
@@ -338,8 +408,10 @@ def collect_device(device, method, credentials, snmp_timeout=5, snmp_retries=1):
             ssh_password=credentials.get("discovery_password") or None,
             ssh_port=credentials.get("discovery_ssh_port") or None,
         )
+    elif method == "both":
+        return collect_both(device, credentials, snmp_timeout=snmp_timeout, snmp_retries=snmp_retries)
     else:
-        return {"method": method, "errors": [f"método desconhecido: '{method}' (use 'ssh' ou 'snmp')"]}
+        return {"method": method, "errors": [f"método desconhecido: '{method}' (use 'ssh', 'snmp' ou 'both')"]}
 
 
 # --------------------------------------------------------------------
@@ -642,22 +714,25 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
     """Grava discovery_method + a credencial correspondente nos custom
     fields do device (mesmos campos criados por create_discovery_fields.py).
 
-    username/password/ssh_port são gravados tanto pra method="ssh" (uso
-    normal) quanto pra method="snmp" (uso opcional: credencial SSH extra
-    só pra confirmar o vínculo VLAN -> porta física em devices MikroTik,
-    ver collect_snmp()/collect_mikrotik_interface_details() -- se o operador
-    não preencher nada aqui num device SNMP, esses campos continuam
-    vazios e a coleta segue 100% via SNMP, sem essa checagem extra)."""
+    username/password/ssh_port são gravados pra method="ssh" (uso normal),
+    method="both" (uso normal, SSH é metade da coleta) e também pra
+    method="snmp" (uso opcional: credencial SSH extra só pra confirmar o
+    vínculo VLAN -> porta física e o comentário real em devices MikroTik,
+    ver collect_snmp()/collect_mikrotik_interface_details() -- se o
+    operador não preencher nada aqui num device SNMP, esses campos
+    continuam vazios e a coleta segue 100% via SNMP, sem essa checagem
+    extra). discovery_snmp_community é gravado pra method="snmp" e
+    method="both"."""
     cf = dict(device.custom_fields or {})
     cf["discovery_method"] = method
-    if method in ("ssh", "snmp"):
+    if method in ("ssh", "snmp", "both"):
         if discovery_username is not None:
             cf["discovery_username"] = discovery_username
         if discovery_password is not None:
             cf["discovery_password"] = discovery_password
         if discovery_ssh_port is not None:
             cf["discovery_ssh_port"] = discovery_ssh_port
-    if method == "snmp":
+    if method in ("snmp", "both"):
         if discovery_snmp_community is not None:
             cf["discovery_snmp_community"] = discovery_snmp_community
     device.update({"custom_fields": cf})

@@ -272,13 +272,27 @@ def dashboard():
     for d in devices:
         cf = d.custom_fields or {}
         method = cf.get("discovery_method")
-        has_cred = bool(cf.get("discovery_username") and cf.get("discovery_password")) if method == "ssh" else bool(cf.get("discovery_snmp_community")) if method == "snmp" else False
+        has_ssh_cred_pair = bool(cf.get("discovery_username") and cf.get("discovery_password"))
+        has_community = bool(cf.get("discovery_snmp_community"))
+        if method == "ssh":
+            has_cred = has_ssh_cred_pair
+        elif method == "snmp":
+            has_cred = has_community
+        elif method == "both":
+            # "both" precisa das DUAS credenciais -- SSH (NAPALM) e SNMP
+            # rodam juntos e os resultados são cruzados por interface (ver
+            # discovery_core.collect_both()).
+            has_cred = has_ssh_cred_pair and has_community
+        else:
+            has_cred = False
         # Independente do método -- usado só pra mostrar "definida"/"—" na
         # célula de Senha (SSH), que agora também serve pro extra opcional
         # de MikroTik em devices configurados como SNMP (ver allow_ssh_cred
-        # no dashboard.html). Não entra no cálculo de "ready": a checagem
-        # extra é opcional, não bloqueia a descoberta principal.
-        has_ssh_cred = bool(cf.get("discovery_username") and cf.get("discovery_password"))
+        # no dashboard.html). Não entra no cálculo de "ready" isolado: a
+        # checagem extra do MikroTik é opcional, não bloqueia a descoberta
+        # principal -- mas pra method="both" ela É obrigatória (embutida
+        # no has_cred acima).
+        has_ssh_cred = has_ssh_cred_pair
         site = _display_case(str(d.site)) if d.site else ""
         region = ""
         try:
@@ -310,7 +324,9 @@ def dashboard():
             "method": method,
             "has_cred": has_cred,
             "has_ssh_cred": has_ssh_cred,
-            "ready": bool(method and has_cred and d.primary_ip4 and (method != "ssh" or d.platform)),
+            # Platform (driver NAPALM) só é obrigatório quando o método
+            # envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
+            "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or d.platform)),
             "cf_username": cf.get("discovery_username") or "",
             "cf_ssh_port": cf.get("discovery_ssh_port") or "",
             "cf_snmp_community": cf.get("discovery_snmp_community") or "",

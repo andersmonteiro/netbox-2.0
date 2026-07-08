@@ -72,9 +72,9 @@
             <th>Região <i class="ti ti-info-circle text-secondary" title="Vem do Site escolhido -- não é editável direto aqui"></i></th>
             <th>Fabricante <i class="ti ti-info-circle text-secondary" title="Fabricante e modelo do device (Device Type)"></i></th>
             <th>IP de gerência <i class="ti ti-info-circle text-secondary" title="IP usado pra conectar e coletar dados do device"></i></th>
-            <th>Platform <i class="ti ti-info-circle text-secondary" title="Driver NAPALM, necessário pra descoberta via SSH"></i></th>
-            <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH (NAPALM) ou SNMP"></i></th>
-            <th>Usuário (SSH) <i class="ti ti-info-circle text-secondary" title="Usuário de login SSH. Em MikroTik configurado como SNMP, é opcional -- só usado pra confirmar o vínculo VLAN/porta física"></i></th>
+            <th>Platform <i class="ti ti-info-circle text-secondary" title="Driver NAPALM, necessário pra descoberta via SSH ou SSH + SNMP"></i></th>
+            <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH (NAPALM), SNMP, ou os dois juntos (roda os dois e cruza o resultado por interface -- útil quando um método sozinho não traz tudo)"></i></th>
+            <th>Usuário (SSH) <i class="ti ti-info-circle text-secondary" title="Usuário de login SSH. Em MikroTik configurado como SNMP, é opcional -- só usado pra confirmar o vínculo VLAN/porta física e o comentário real da interface"></i></th>
             <th>Senha (SSH) <i class="ti ti-info-circle text-secondary" title="Senha de login SSH -- nunca é exibida, só substituída. Em MikroTik configurado como SNMP, é opcional"></i></th>
             <th>Porta SSH <i class="ti ti-info-circle text-secondary" title="Padrão 22 se deixar em branco"></i></th>
             <th>Community (SNMP) <i class="ti ti-info-circle text-secondary" title="Community string usada no SNMP (ex: public)"></i></th>
@@ -139,15 +139,18 @@
             </td>
             <td>
               <span class="view-val click-edit" tabindex="0">
-                {% if r.method %}<span class="badge bg-teal-lt badge-method">{{ r.method|upper }}</span>{% else %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
+                {% if r.method == 'both' %}<span class="badge bg-teal-lt badge-method">SSH + SNMP</span>
+                {% elif r.method %}<span class="badge bg-teal-lt badge-method">{{ r.method|upper }}</span>
+                {% else %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
               </span>
               <select class="edit-val form-select form-select-sm f-method" style="display:none">
                 <option value="">— selecione —</option>
                 <option value="ssh" {% if r.method == 'ssh' %}selected{% endif %}>SSH (NAPALM)</option>
                 <option value="snmp" {% if r.method == 'snmp' %}selected{% endif %}>SNMP</option>
+                <option value="both" {% if r.method == 'both' %}selected{% endif %}>SSH + SNMP (cruza os dois)</option>
               </select>
             </td>
-            {% set allow_ssh_cred = r.method == 'ssh' or (r.method == 'snmp' and 'mikrotik' in (r.manufacturer or '')|lower) %}
+            {% set allow_ssh_cred = r.method in ('ssh', 'both') or (r.method == 'snmp' and 'mikrotik' in (r.manufacturer or '')|lower) %}
             <td>
               {% if allow_ssh_cred %}
               <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_username or "—" }}</span>
@@ -176,7 +179,7 @@
               {% endif %}
             </td>
             <td>
-              {% if r.method == 'snmp' %}
+              {% if r.method in ('snmp', 'both') %}
               <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_snmp_community or "—" }}</span>
               <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_snmp_community }}" style="display:none" autocomplete="off">
               {% else %}
