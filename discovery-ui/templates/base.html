@@ -164,7 +164,7 @@
     </header>
     <div class="page-wrapper">
       <div class="page-body">
-        <div class="container-xl">
+        <div class="{% block container_class %}container-xl{% endblock %}">
           {% with messages = get_flashed_messages(with_categories=true) %}
             {% for category, message in messages %}
               <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible" role="alert">
