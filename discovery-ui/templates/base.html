@@ -147,14 +147,21 @@
        e centraliza o conteúdo de cada um dentro dela -- assim a altura
        deixa de depender do conteúdo interno (badge vs ícone vs texto) e
        o alinhamento fica garantido, não só "tentado". */
+    .navbar-actions { display: flex !important; align-items: center !important; height: 2.5rem; }
+    .navbar-actions .nav-item.dropdown { display: flex !important; align-items: center !important; height: 100% !important; }
     .navbar-action-link {
       display: flex !important;
       align-items: center !important;
-      height: 2.25rem;
+      height: 100% !important;
       line-height: 1 !important;
       padding: 0 .5rem !important;
+      box-sizing: border-box !important;
     }
-    .navbar-action-link .badge { vertical-align: middle; }
+    .navbar-action-link .badge {
+      display: inline-flex !important;
+      align-items: center !important;
+      vertical-align: middle !important;
+    }
 
     /* Botões no estilo "Start for free" (claro, sólido) / "Get a demo"
        (escuro, contornado) do site -- raio pequeno em vez do arredondado
