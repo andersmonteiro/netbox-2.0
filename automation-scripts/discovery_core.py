@@ -44,6 +44,15 @@ OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
 OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
 OID_IF_DESCR = "1.3.6.1.2.1.2.2.1.2"
 OID_IF_NAME = "1.3.6.1.2.1.31.1.1.1.1"  # ifXTable -- nome mais legível, quando o device suporta
+# ifAlias (ifXTable): a descrição de VERDADE, digitada pelo operador na
+# porta (ex: "LINK-CLIENTE-XPTO"). Diferente de ifDescr (OID acima), que é
+# só um texto técnico do driver/hardware da interface e, na prática, na
+# maioria dos vendors sai igual ou muito parecido com o nome da porta --
+# usar ifDescr como "descrição" fazia a Descrição da revisão vir com o
+# nome da interface repetido sempre que não havia descrição configurada
+# de verdade. ifAlias fica vazio quando o operador não configurou nada,
+# que é o comportamento certo (ver collect_snmp() abaixo).
+OID_IF_ALIAS = "1.3.6.1.2.1.31.1.1.1.18"
 OID_IF_ADMIN_STATUS = "1.3.6.1.2.1.2.2.1.7"
 OID_IF_OPER_STATUS = "1.3.6.1.2.1.2.2.1.8"
 
@@ -111,6 +120,14 @@ def collect_snmp(device, community, timeout=5, retries=1, ssh_username=None, ssh
 
         if_descr = snmp_walk(host, community, OID_IF_DESCR, timeout, retries)
         if_name = snmp_walk(host, community, OID_IF_NAME, timeout, retries)
+        # ifAlias pode não existir em devices sem ifXTable completo -- não
+        # é erro, só fica sem descrição nenhuma pra essas portas (melhor
+        # que preencher com o nome cru da interface, que é o que ifDescr
+        # ia dar).
+        try:
+            if_alias = snmp_walk(host, community, OID_IF_ALIAS, timeout, retries)
+        except Exception:
+            if_alias = {}
         admin_status = snmp_walk(host, community, OID_IF_ADMIN_STATUS, timeout, retries)
         oper_status = snmp_walk(host, community, OID_IF_OPER_STATUS, timeout, retries)
 
@@ -120,7 +137,11 @@ def collect_snmp(device, community, timeout=5, retries=1, ssh_username=None, ssh
                 {
                     "index": idx,
                     "name": if_name.get(idx) or descr,
-                    "descr": descr,
+                    # ifAlias = descrição configurada pelo operador de
+                    # verdade (ver comentário no OID_IF_ALIAS acima) --
+                    # vazio quando não tem nada configurado, em vez de
+                    # repetir o nome/descrição técnica da porta.
+                    "descr": if_alias.get(idx) or "",
                     "admin_status": _normalize_status(admin_status.get(idx)),
                     "oper_status": _normalize_status(oper_status.get(idx)),
                 }
@@ -560,6 +581,50 @@ INTERFACE_TYPE_CHOICES = [
     ("100gbase-x-qsfp28", "QSFP28 (100GE)"),
     ("other", "Other"),
 ]
+
+
+# --------------------------------------------------------------------
+# Ordem usada pra AGRUPAR as interfaces na tela de revisão -- físicas
+# primeiro (por velocidade crescente), depois LAG/bridge, e
+# virtual/VLAN por último (normalmente é sub-interface "por cima" de
+# uma porta física, faz sentido aparecer depois dela na lista). Não é
+# a mesma ordem de INTERFACE_TYPE_CHOICES (que é só a ordem das opções
+# do dropdown "Tipo" e prioriza "virtual" primeiro por ser o tipo mais
+# comum de sub-interface/VLAN nesse projeto).
+# --------------------------------------------------------------------
+INTERFACE_TYPE_SORT_ORDER = [
+    "100base-tx",
+    "1000base-t",
+    "2.5gbase-t",
+    "5gbase-t",
+    "10gbase-t",
+    "1000base-x-sfp",
+    "10gbase-x-sfpp",
+    "25gbase-x-sfp28",
+    "40gbase-x-qsfpp",
+    "100gbase-x-qsfp28",
+    "lag",
+    "bridge",
+    "virtual",
+    "other",
+]
+_INTERFACE_TYPE_SORT_INDEX = {t: i for i, t in enumerate(INTERFACE_TYPE_SORT_ORDER)}
+
+
+def _natural_sort_key(name):
+    """Quebra o nome em pedaços texto/número pra ordenar 'Gi0/0/2' antes
+    de 'Gi0/0/10' -- ordenação alfabética pura colocaria o '10' antes
+    do '2'."""
+    return [int(p) if p.isdigit() else p.lower() for p in re.split(r"(\d+)", name or "")]
+
+
+def interface_sort_key(iface):
+    """Chave de ordenação usada na tela de revisão -- agrupa por tipo
+    (usa guessed_type se já calculado, senão chuta na hora) e, dentro
+    do mesmo tipo, ordena pelo nome de forma natural/numérica."""
+    itype = iface.get("guessed_type") or guess_interface_type(iface.get("name"))
+    type_idx = _INTERFACE_TYPE_SORT_INDEX.get(itype, len(INTERFACE_TYPE_SORT_ORDER))
+    return (type_idx, _natural_sort_key(iface.get("name")))
 
 
 def guess_interface_type(name):

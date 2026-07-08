@@ -668,6 +668,12 @@ def review():
                 iface["existing_description"] = existing_if.description if existing_if else ""
                 iface["existing_ips"] = ips_by_iface_id.get(existing_if.id, []) if existing_if else []
 
+            # Agrupa por tipo (físicas por velocidade crescente, depois
+            # LAG/bridge/virtual) e ordena por nome dentro do mesmo tipo --
+            # antes disso a ordem era a que veio da coleta (walk SNMP ou
+            # dict do NAPALM), que não segue tipo nem nome.
+            interfaces.sort(key=core.interface_sort_key)
+
             n_up = sum(1 for i in interfaces if i.get("oper_status") == "up")
             items.append({
                 "filename": f.name, "data": data, "n_interfaces": len(interfaces), "n_up": n_up,
