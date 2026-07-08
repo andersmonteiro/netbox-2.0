@@ -521,6 +521,15 @@ def discover():
 @app.route("/review")
 @login_required
 def review():
+    # Usado pra buscar o que já está salvo de verdade no NetBox (descrição
+    # e IP) por interface -- best-effort: se o NetBox estiver fora do ar
+    # nesse momento, a revisão continua funcionando só com o que veio da
+    # descoberta (ver try/except abaixo).
+    try:
+        nb = get_nb()
+    except Exception:
+        nb = None
+
     items = []
     if OUTPUT_DIR.exists():
         for f in sorted(OUTPUT_DIR.glob("*.json")):
@@ -530,6 +539,25 @@ def review():
                 continue
             interfaces = data.get("interfaces", [])
             all_names = [i.get("name") for i in interfaces if i.get("name")]
+
+            # Interfaces e IPs já existentes no NetBox pra esse device --
+            # uma chamada pra cada (não uma por interface), pra não gerar
+            # N+1 em devices com dezenas/centenas de interfaces.
+            existing_by_norm = {}
+            ips_by_iface_id = {}
+            device_id = data.get("device_id")
+            if nb is not None and device_id:
+                try:
+                    for ei in nb.dcim.interfaces.filter(device_id=device_id):
+                        existing_by_norm[core.normalize_ifname(ei.name)] = ei
+                    for ip in nb.ipam.ip_addresses.filter(device_id=device_id):
+                        aoid = getattr(ip, "assigned_object_id", None)
+                        if aoid:
+                            ips_by_iface_id.setdefault(aoid, []).append(str(ip.address))
+                except Exception:
+                    existing_by_norm = {}
+                    ips_by_iface_id = {}
+
             for iface in interfaces:
                 # Chute de tipo/flag de VLAN calculados aqui (não gravados
                 # no JSON em disco) -- assim uma descoberta que já estava
@@ -546,6 +574,19 @@ def review():
                     iface.get("vlan_parent_from_device")
                     or (core.guess_parent_name(iface.get("name"), all_names) if iface["is_vlan"] else None)
                 )
+
+                # Descrição/IP REAIS já salvos no NetBox pra essa interface
+                # (quando ela já existe) -- a descrição que vem da própria
+                # descoberta (SNMP ifDescr, por exemplo) costuma ser só o
+                # nome cru da porta, não o comentário que o operador já
+                # colocou no NetBox, então priorizamos o que já está salvo
+                # no campo de edição (o operador ainda pode trocar). O IP
+                # é só informativo (não editável aqui -- atribuir IP é
+                # outro fluxo).
+                existing_if = existing_by_norm.get(core.normalize_ifname(iface.get("name")))
+                iface["existing_description"] = existing_if.description if existing_if else ""
+                iface["existing_ips"] = ips_by_iface_id.get(existing_if.id, []) if existing_if else []
+
             n_up = sum(1 for i in interfaces if i.get("oper_status") == "up")
             items.append({
                 "filename": f.name, "data": data, "n_interfaces": len(interfaces), "n_up": n_up,
