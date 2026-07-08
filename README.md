@@ -13,9 +13,8 @@ estende o repositório oficial [`netbox-community/netbox-docker`](https://github
 "Versão do NetBox e compatibilidade de plugins" mais abaixo antes de
 mudar isso.
 
-Plugins incluídos: **netbox-topology-views** (mapa de topologia),
-**netbox-qrcode** (QR Code pra etiqueta física de device/rack/cabo) e
-**netbox_diode_plugin** (ingestão via Diode/Orb Agent).
+Plugins incluídos: **netbox-topology-views** (mapa de topologia) e
+**netbox-qrcode** (QR Code pra etiqueta física de device/rack/cabo).
 
 ## Estrutura deste repositório
 
@@ -39,7 +38,7 @@ netbox-2.0/
 │   ├── create_discovery_fields.py  <- cria os custom fields de credencial no NetBox
 │   ├── discovery_core.py           <- lógica compartilhada (coleta SSH/SNMP + apply), usada pelo CLI e pela discovery-ui
 │   └── discovery_netbox.py         <- CLI: lê credencial do NetBox, coleta SSH/SNMP, revisão em JSON, aplica
-├── discovery-ui/                   <- interface web de descoberta (login simples, sem Diode -- ver seção 2.4)
+├── discovery-ui/                   <- interface web de descoberta (login simples -- ver seção 2.4)
 │   ├── app.py
 │   ├── requirements.txt
 │   ├── Dockerfile
@@ -47,11 +46,9 @@ netbox-2.0/
 ├── docker-compose.discovery-ui.yml <- instalação STANDALONE (só a discovery-ui, sem subir NetBox -- seção 3)
 ├── install-discovery-ui.sh         <- instalador 1-comando da instalação standalone
 ├── .env.discovery-ui.example       <- copie para .env.discovery-ui (instalação standalone)
-├── netbox-seed/                    <- catálogo de device types pré-cadastrado (seção 2.5)
-│   ├── device-catalog.sql          <- dump limpo (sem device/IP/usuário real de cliente)
-│   └── devicetype-images/          <- fotos de frente/costas referenciadas pelo dump
-└── orb-agent/
-    └── agent.yaml.example          <- descoberta de rede opcional via Diode (seção 2.3, desligado por padrão)
+└── netbox-seed/                    <- catálogo de device types pré-cadastrado (seção 2.5)
+    ├── device-catalog.sql          <- dump limpo (sem device/IP/usuário real de cliente)
+    └── devicetype-images/          <- fotos de frente/costas referenciadas pelo dump
 ```
 
 Este é um **repositório template**: nada aqui tem dado de cliente
@@ -65,15 +62,12 @@ usa a última versão estável. Cada cliente tem seu próprio `.env`
 
 ### Servidor novo, sem nada instalado (recomendado para clientes)
 
-Um único comando: instala Docker + dependências (git, nmap, python3,
-jq...), clona este template, sobe o `netbox-docker` oficial com o
-overlay aplicado, gera senha/token do superusuário automaticamente,
-**sobe também a discovery-ui** (interface web de descoberta, seção 2.4
-— login simples, pensada pro time comercial revisar/aprovar
-descobertas sem usar terminal) e deixa a stack no ar. O Diode (seção
-2.3) fica **desligado por padrão** — é uma stack separada e mais
-pesada, só vale a pena se você já usa o ecossistema Diode/Orb Agent;
-ligue com `WITH_DIODE=true` se quiser.
+Um único comando: instala Docker + dependências (git, nmap, python3...),
+clona este template, sobe o `netbox-docker` oficial com o overlay
+aplicado, gera senha/token do superusuário automaticamente, **sobe
+também a discovery-ui** (interface web de descoberta, seção 2.4 —
+login simples, pensada pro time comercial revisar/aprovar descobertas
+sem usar terminal) e deixa a stack no ar.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
@@ -188,14 +182,13 @@ Tabela de compatibilidade dos plugins deste template, hoje (NetBox 4.5.x):
 
 | Plugin | Versão pinada | Compatível com 4.5.x | Compatível com 4.6.x |
 | --- | --- | --- | --- |
-| netbox_diode_plugin | 1.7.0 | Sim | Não (precisa 1.12.0) |
 | netbox-topology-views | 4.5.1 | Sim | Não (sem release ainda) |
 | netbox-qrcode | 0.0.20 | Sim | Não (precisa 0.0.21) |
 
 **Como fazer upgrade pra NetBox 4.6+ no futuro:** confira se
 `netbox-topology-views` já lançou versão pra 4.6 (é normalmente o
-gargalo — os outros dois já têm release pronta pra 4.6). Se sim,
-atualize os três pins em `plugin_requirements.txt` junto com o
+gargalo — o `netbox-qrcode` já tem release pronta pra 4.6). Se sim,
+atualize os pins em `plugin_requirements.txt` junto com o
 `FROM netboxcommunity/netbox:v4.6.X` (use o número exato do patch mais
 recente da série 4.6 nessa hora, pelo mesmo motivo acima) no
 `Dockerfile-Plugins` **na mesma mudança**, e rode
@@ -208,7 +201,7 @@ tabela primeiro.
 Você pediu três frentes — seguem as três, cada uma resolvendo um cenário
 diferente. Elas não se excluem: normalmente se usa CSV para a carga
 inicial, NAPALM para manter os devices já cadastrados atualizados, e
-scan/Diode para achar o que ainda não está no NetBox.
+scan/descoberta para achar o que ainda não está no NetBox.
 
 ### 2.1 Importação em massa via CSV/Excel
 
@@ -248,224 +241,23 @@ script completa o resto.
 
 ### 2.3 Descoberta de rede
 
-Duas opções, dependendo do quanto você quer investir:
-
-**Opção simples — `discover_network.py` (incluso neste pacote):**
-faz um ping sweep com `nmap` e cria IPs no NetBox com a tag
-`auto-discovered` para revisão manual.
+**`discover_network.py` (incluso neste pacote):** faz um ping sweep com
+`nmap` e cria IPs no NetBox com a tag `auto-discovered` para revisão
+manual.
 
 ```bash
 python discover_network.py 10.0.0.0/24 --site "Matriz"
 ```
 
-**Opção oficial e mais robusta — Diode + Orb Agent (NetBox Labs):**
-é o produto oficial da NetBox Labs pra isso, com reconciliação de
-dados e suporte a múltiplos protocolos (SSH/NAPALM, SNMP, ping/porta).
-Já deixei o plugin `netbox_diode_plugin` no `plugin_requirements.txt`
-(pinado na versão 1.7.0, compatível com NetBox 4.5.x) pra você não
-precisar rebuildar a imagem depois.
-
-**O Diode fica desligado por padrão** (o caminho recomendado de
-descoberta é a `discovery-ui`/`discovery_netbox.py` da seção 2.4, que
-não depende de nenhum serviço externo). Se você quiser mesmo assim,
-rode o `bootstrap.sh` com `WITH_DIODE=true` (ou `--with-diode`) e os
-passos 1 e 2 abaixo rodam sozinhos — Diode sobe automaticamente e
-`orb-agent/agent.yaml` já sai criado com as credenciais certas. Só
-falta o **passo 3**: editar os `targets` com as subnets reais do
-cliente e rodar o container. Os passos 1-2 abaixo servem pra quem
-instalou com `setup.sh` (sem bootstrap) ou quer ligar o Diode depois,
-manualmente.
-
-Pré-requisito: `jq` instalado (o `bootstrap.sh` já instala; se você usou
-o `setup.sh` num servidor que já tinha Docker, confira com `jq --version`
-e instale com `apt install jq` se faltar).
-
-Passo 1 — subir o servidor Diode (stack própria, separada do NetBox;
-pode rodar na mesma VM do NetBox, só que como um `docker compose`
-diferente):
-
-```bash
-mkdir -p /opt/diode && cd /opt/diode
-curl -sSfLo quickstart.sh https://raw.githubusercontent.com/netboxlabs/diode/release/diode-server/docker/scripts/quickstart.sh
-chmod +x quickstart.sh
-./quickstart.sh http://SEU_NETBOX_IP:8000
-echo "DIODE_TAG=1.13.0" >> .env
-cat > docker-compose.override.yml <<'EOF'
-services:
-  diode-auth:
-    image: netboxlabs/diode-auth:1.12.0
-  diode-auth-bootstrap:
-    image: netboxlabs/diode-auth:1.12.0
-EOF
-docker compose up -d
-```
-
-**Por que esse pin de versão**: o `quickstart.sh` baixa a branch
-`release` do Diode, que sempre aponta pra última imagem (`latest`) sem
-aviso de versão. Confirmamos em produção que a versão atual dela
-(2.0.0, 22/mai) exige o plugin `netbox_diode_plugin` >=1.12.0, que por
-sua vez exige NetBox >=4.6.0 — mas este template fixa NetBox em 4.5.x
-(por causa do `netbox-topology-views`, que ainda não suporta 4.6 — ver
-`plugin_requirements.txt`). O resultado é uma quebra silenciosa: login
-e ingestão no Diode funcionam normalmente, mas **nada cai no IPAM do
-NetBox**, porque o `diode-reconciler` chama
-`/api/plugins/diode/bulk-plan-apply/`, endpoint que só existe a partir
-do plugin 1.12.0 — com o plugin 1.7.0 (o pinado aqui) isso dá 404
-(`docker compose logs diode-reconciler` mostra `404 Page Not Found`).
-
-A última leva de imagens anterior a essa mudança (13/jan, release
-"NetBox 4.5.x support") ainda usa `apply-change-set`/`generate-diff`,
-compatível com o plugin 1.7.0-1.11.0 / NetBox 4.5.x — só que os três
-serviços do Diode **não compartilham numeração de versão**:
-`diode-ingester` e `diode-reconciler` pararam em `1.13.0` nessa leva,
-mas `diode-auth` em `1.12.0` (confirmado nas tags do Docker Hub — não
-existe `netboxlabs/diode-auth:1.13.0`, tentar usar dá `not found` no
-`docker compose up -d`). Por isso o `DIODE_TAG=1.13.0` sozinho não
-serve pros três — ele pina certo o ingester/reconciler via variável de
-ambiente do `docker-compose.yaml` oficial, e o `docker-compose.override.yml`
-acima sobrescreve só a imagem do `diode-auth`/`diode-auth-bootstrap`
-pra `1.12.0` (o compose já mescla esse override automaticamente, sem
-precisar de `-f`). O `bootstrap.sh` já faz isso tudo automaticamente;
-se você rodou o `quickstart.sh` na mão antes desta versão do template
-(ou já tem uma instalação com `.env` sem `DIODE_TAG`), corrija e
-recrie os containers:
-
-```bash
-cd /opt/diode
-grep -q '^DIODE_TAG=' .env || echo "DIODE_TAG=1.13.0" >> .env
-cat > docker-compose.override.yml <<'EOF'
-services:
-  diode-auth:
-    image: netboxlabs/diode-auth:1.12.0
-  diode-auth-bootstrap:
-    image: netboxlabs/diode-auth:1.12.0
-EOF
-docker compose up -d
-```
-
-O `quickstart.sh` já faz tudo sozinho: baixa o `docker-compose.yaml` e
-`nginx.conf` do Diode, gera **três** clients OAuth2 em
-`oauth2/client/client-credentials.json` (`diode-ingest`,
-`diode-to-netbox`, `netbox-to-diode`), preenche o `.env` com os
-segredos e o `NETBOX_HOST`, e no final imprime o `DIODE_CLIENT_ID` /
-`DIODE_CLIENT_SECRET` do client `diode-ingest` — já prontos pro Orb
-Agent (passo 3). **Não precisa criar cliente manualmente** — isso é o
-comportamento atual do script; se algum dia mudar, o próprio output
-final dele avisa.
-
-Passo 2 — pegar o secret do client `netbox-to-diode` (usado pelo plugin
-dentro do NetBox, não pelo Orb Agent) e colar na configuração:
-
-```bash
-jq -r '.[] | select(.client_id=="netbox-to-diode") | .client_secret' \
-  oauth2/client/client-credentials.json
-```
-
-Cole o valor em `configuration/plugins.py` →
-`netbox_to_diode_client_secret`, e ajuste `diode_target_override` pra
-`grpc://SEU_SERVIDOR_IP:8080/diode` (a porta é o `DIODE_NGINX_PORT` do
-`.env` do Diode, 8080 por padrão). **Use o IP do servidor, não
-`localhost`** — o Diode roda num `docker compose` separado do NetBox,
-então "localhost" de dentro do container do NetBox não alcança o Diode
-mesmo estando na mesma VM. Depois, rebuilde e reinicie o NetBox:
-
-```bash
-cd /opt/netbox-2.0/netbox-docker
-docker compose build --no-cache
-docker compose up -d
-```
-
-**Bug conhecido — 401 nos logs do NetBox ao consultar o Diode**: o
-client `netbox-to-diode` criado pelo `quickstart.sh` só aceita
-autenticação `client_secret_post`, mas o `netbox_diode_plugin` manda
-`client_secret_basic` — o Hydra rejeita com 401 (`docker compose logs
-netbox | grep -i diode` mostra `Diode Auth token introspection
-failed`). O `bootstrap.sh` já corrige isso automaticamente; se você
-seguiu esse passo 2 na mão, corrija recriando o client com o mesmo
-secret via `authmanager` (que registra com o método certo):
-
-```bash
-cd /opt/diode
-docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode
-docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="O_MESMO_SECRET_DE_ANTES"
-```
-
-Passo 3 — configurar e rodar o Orb Agent. Copie
-`orb-agent/agent.yaml.example` deste template para `orb-agent/agent.yaml`,
-ajuste os `targets` (subnets reais do cliente), o `target:` do Diode
-para `grpc://SEU_SERVIDOR_IP:8080/diode` (mesmo endereço do passo 2), e
-o `client_id`/`client_secret` do client `diode-ingest` (pego com `jq`,
-ver comentário no `.example`). **Cole o valor literal no YAML — o Orb
-Agent não expande `${VAR}`** (testamos: ele manda a string
-`"${DIODE_CLIENT_ID}"` literal pro Diode e a autenticação falha).
-`agent.yaml` já está no `.gitignore` por conter esse secret. Depois:
-
-```bash
-cd orb-agent
-docker run -d --name orb-agent --net=host --restart unless-stopped \
-  -v "$(pwd)":/opt/orb/ \
-  netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
-```
-
-**O `network_discovery` sozinho é "pobre" de propósito**: é uma
-varredura sem credencial (ping + porta), então só cria o IP no NetBox
-com as portas abertas nos comentários — não sabe modelo, fabricante,
-interfaces, nem cria objeto de Device. Isso é uma limitação de
-qualquer ferramenta de descoberta às cegas, não bug. Ele serve pra
-mapear "o que existe" na rede; pra detalhar de verdade um device que
-você já sabe que existe, use um dos dois backends de enriquecimento
-que o `agent.yaml.example` também já traz (comente o que não for usar):
-
-- **`device_discovery`** (SSH/NAPALM) — conecta em cada device com
-  usuário/senha e traz inventário completo (interfaces, versão de SO,
-  seriais). Precisa de credencial de shell por device.
-- **`snmp_discovery`** — mesma ideia, mas via SNMP (community v2c ou
-  credenciais v3) em vez de SSH. Costuma ser mais simples de habilitar
-  em switch/roteador que já tem SNMP ligado pro Zabbix.
-
-Diferente do `client_id`/`client_secret` do Diode (que **não** aceita
-`${VAR}`, precisa do valor literal no arquivo — nota acima), a
-documentação oficial do Orb Agent afirma que os campos de credencial
-desses dois backends (`password` do `device_discovery`;
-`community`/`username`/`auth_passphrase`/`priv_passphrase` do
-`snmp_discovery`) **aceitam `${VAR}`** de verdade, resolvida via
-variável de ambiente no `docker run -e`:
-
-```bash
-docker run -d --name orb-agent --net=host --restart unless-stopped \
-  -v "$(pwd)":/opt/orb/ \
-  -e DEVICE_PASSWORD='senha-do-device' \
-  -e SNMP_COMMUNITY='community-do-snmp' \
-  netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
-```
-
-Não confirmamos isso em produção ainda (só o comportamento do bloco
-`diode`, que falha) — depois do primeiro deploy com esses backends,
-confira `docker logs orb-agent` pra garantir que a credencial saiu
-resolvida e não como a string literal `${VAR}`. Se não expandir, o
-sintoma é o mesmo do bug do Diode: troque pelo valor real direto no
-YAML (e lembre que `agent.yaml` já está no `.gitignore` por causa
-disso).
-
-Use `dry_run: true` no bloco `diode:` se quiser conferir o que seria
-enviado antes de aplicar de verdade no NetBox — mais detalhes e outros
-cenários (jumphost/bastion, drivers customizados, OpenTelemetry) em
-https://netboxlabs.com/docs/orb-agent/config_samples.
-
-> Nota de licença: Diode e Orb Agent são distribuídos sob a "NetBox
-> Limited Use License 1.0" (não é Apache/MIT) — gratuito para uso, mas
-> vale ler os termos antes de colocar em produção. O Orb Agent está em
-> estágio "Public Preview" (pode mudar).
+Pra descoberta com detalhe (interfaces, serial, versão de SO via
+SSH/SNMP), use a `discovery-ui`/`discovery_netbox.py` da seção 2.4.
 
 ### 2.4 Enriquecimento a partir de credenciais cadastradas no NetBox
 
-Alternativa ao Orb Agent pros casos em que você quer: (a) cadastrar a
-credencial de cada device direto no NetBox (sem editar YAML/reiniciar
-container), e (b) **revisar o resultado antes de gravar** (em vez de
-aplicar automático via Diode). Reaproveita a mesma ideia do
-`device_discovery`/`snmp_discovery` do Orb Agent, mas com o NetBox como
-fonte da lista de alvos+credenciais, e um passo explícito de
-confirmação no meio.
+Caminho recomendado de descoberta: (a) cadastra a credencial de cada
+device direto no NetBox (sem editar YAML/reiniciar container), e (b)
+**revisa o resultado antes de gravar** — nada é aplicado automático,
+sempre passa por um passo explícito de confirmação.
 
 ```mermaid
 flowchart TD
@@ -650,16 +442,14 @@ seção 2.4, é a mesma tela.
    (seção 2.2).
 4. Cadastre as credenciais de descoberta pela discovery-ui e rode as
    primeiras descobertas (seção 2.4).
-5. Se quiser descoberta contínua de rede via Diode + orb-agent, avalie
-   subir isso depois (seção 2.3, opcional).
 
 ## 5. Uso com GitHub (template público + múltiplos clientes)
 
 Este repositório é **público** de propósito: é só ferramenta/automação
 genérica, sem dado de cliente (o `.gitignore` bloqueia `.env`,
-planilhas, credenciais do Diode etc. — ver seção 7). Isso permite que
-qualquer servidor de cliente rode o `bootstrap.sh` via `curl | bash`
-(seção 1) sem precisar de chave SSH nem token de acesso.
+planilhas etc. — ver seção 6). Isso permite que qualquer servidor de
+cliente rode o `bootstrap.sh` via `curl | bash` (seção 1) sem precisar
+de chave SSH nem token de acesso.
 
 **Criar/configurar o repositório no GitHub:**
 
@@ -703,7 +493,6 @@ Zone" → **Change visibility** → Public.
 
 - `.env` / `.env.discovery-ui` (senhas, tokens de API do NetBox)
 - Planilhas de importação com IPs/hostnames reais de cliente
-- `client-credentials.json` do Diode (contém `client_secret` OAuth2)
 - Nomes de clientes, topologia de rede real, ou qualquer coisa que
   identifique um cliente específico — isso é template, não deploy
 
@@ -718,9 +507,6 @@ recriar o repositório.
 
 - [netbox-community/netbox-docker](https://github.com/netbox-community/netbox-docker)
 - [Using NetBox Plugins (wiki)](https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins)
-- [netboxlabs/diode](https://github.com/netboxlabs/diode)
-- [netboxlabs/diode-netbox-plugin](https://github.com/netboxlabs/diode-netbox-plugin)
 - [netbox-community/netbox-topology-views](https://github.com/netbox-community/netbox-topology-views) (tabela de compatibilidade no README)
 - [netbox-community/netbox-qrcode](https://github.com/netbox-community/netbox-qrcode) (COMPATIBILITY.md)
-- [Orb Agent — configuração e exemplos](https://netboxlabs.com/docs/orb-agent/config_samples)
 - [netboxcommunity/netbox tags (Docker Hub)](https://hub.docker.com/r/netboxcommunity/netbox/tags) — usado para confirmar qual patch a tag `v4.5` aponta hoje

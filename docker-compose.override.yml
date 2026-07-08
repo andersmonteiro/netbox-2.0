@@ -76,8 +76,8 @@ services:
       - .env
 
   # --------------------------------------------------------------------
-  # Interface web de descoberta de rede (login simples, sem Diode) --
-  # ver README.md seção 2.4. Build a partir da raiz (context: .) porque
+  # Interface web de descoberta de rede (login simples) -- ver README.md
+  # seção 2.4. Build a partir da raiz (context: .) porque
   # o Dockerfile precisa copiar automation-scripts/discovery_core.py,
   # compartilhado com o CLI. O volume abaixo aponta pra mesma pasta
   # discovery_output/ usada pelo CLI (discovery_netbox.py), então um
@@ -101,12 +101,3 @@ services:
       - "5050:5050"
     volumes:
       - ./automation-scripts/discovery_output:/app/discovery_output
-
-# --------------------------------------------------------------------
-# Diode (ingestão automática via descoberta de rede) NÃO entra aqui.
-# É um produto separado da NetBox Labs, com seu próprio docker-compose
-# (Auth + Ingester + Reconciler + Postgres + Redis) instalado via script
-# oficial "quickstart.sh". Ver README.md -> seção "Diode" para o passo a
-# passo completo, incluindo o plugin netbox_diode_plugin (já incluído em
-# plugins/plugin_requirements.txt) e o orb-agent de descoberta.
-# --------------------------------------------------------------------

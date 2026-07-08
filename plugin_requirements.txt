@@ -11,12 +11,6 @@
 # isso que quebrou antes com "latest".
 # ==========================================================================
 
-# Plugin oficial da NetBox Labs, necessário para receber dados via Diode
-# (ingestão automática vinda de descoberta de rede / orb-agent / SDKs).
-# Compatibilidade: NetBox >=4.5.0 -> plugin 1.7.0 (>=4.6.0 exige 1.12.0)
-# https://github.com/netboxlabs/diode-netbox-plugin
-netboxlabs-diode-netbox-plugin==1.7.0
-
 # Mapa de topologia gerado a partir dos cabos/conexões já cadastrados.
 # Compatibilidade: NetBox = 4.5.X -> plugin = 4.5.1 (só suporta 4.5.X,
 # ainda não tem release pra linha 4.6)

@@ -8,23 +8,17 @@
 #   curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 #
 # O que ele faz:
-#   1. Instala dependências de sistema (git, curl, nmap, python3, openssl, jq)
+#   1. Instala dependências de sistema (git, curl, nmap, python3, openssl)
 #   2. Instala Docker Engine + Docker Compose plugin (script oficial da
 #      Docker), se ainda não estiverem instalados
 #   3. Clona este template (se ainda não estiver rodando de dentro dele)
 #   4. Roda o setup.sh (clona o netbox-docker oficial + aplica o overlay)
-#   5. Gera (ou pergunta) a senha/token do superusuário
-#   6. Restaura o catálogo de device types (netbox-seed/) -- SÓ na 1ª
-#      instalação, quando o banco ainda está vazio (ver seção 2.5 do
-#      README). Numa reinstalação sobre um banco que já tem dado, isso
-#      é pulado automaticamente pra não sobrescrever nada.
-#   7. Diode (stack separada, opcional) -- DESLIGADO por padrão. O
-#      caminho recomendado pra descoberta/enriquecimento é
-#      automation-scripts/discovery_netbox.py (SSH/SNMP direto via API
-#      do NetBox, sem depender de nenhum serviço externo -- ver seção
-#      2.4 do README). Ligue com WITH_DIODE=true / --with-diode se
-#      quiser mesmo assim (ex: pra descoberta rasa via Orb Agent).
-#   8. Builda a imagem e sobe a stack (inclui a discovery-ui, interface
+#   5. Gera (ou pergunta) a senha/token do superusuário, restaura o
+#      catálogo de device types (netbox-seed/) -- SÓ na 1ª instalação,
+#      quando o banco ainda está vazio (ver seção 2.5 do README). Numa
+#      reinstalação sobre um banco que já tem dado, isso é pulado
+#      automaticamente pra não sobrescrever nada.
+#   6. Builda a imagem e sobe a stack (inclui a discovery-ui, interface
 #      web de descoberta em http://SEU_SERVIDOR:5050 -- login simples,
 #      pensada pro time comercial revisar/aprovar descobertas sem usar
 #      terminal) — a 1ª subida roda uma leva grande de migrations e
@@ -50,33 +44,11 @@
 #                          (discovery-ui, porta 5050) -- usuário fixo
 #                          "admin" (troque DISCOVERY_UI_USER no .env se
 #                          quiser outro).
-#   WITH_DIODE          -> default: false. Diode NÃO sobe por padrão --
-#                          o caminho recomendado de descoberta é
-#                          discovery_netbox.py (seção 2.4 do README).
-#                          Defina "true" pra ligar (equivalente à flag
-#                          --with-diode abaixo -- use a variável quando
-#                          rodar via "curl | bash", já que nesse modo
-#                          passar flag pro script exige a sintaxe mais
-#                          chata "curl ... | bash -s -- --with-diode").
-#   DIODE_DIR           -> default: /opt/diode
-#
-# Flags (só funcionam rodando o arquivo direto, ex: ./bootstrap.sh
-# --with-diode -- veja WITH_DIODE acima pro modo curl|bash):
-#   --with-diode  liga o Diode (equivale a WITH_DIODE=true)
-#   --no-diode    força desligado (já é o padrão, existe só por clareza)
 # ==========================================================================
 set -euo pipefail
 
 TEMPLATE_REPO_URL="${TEMPLATE_REPO_URL:-https://github.com/andersmonteiro/netbox-2.0.git}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/netbox-2.0}"
-DIODE_DIR="${DIODE_DIR:-/opt/diode}"
-WITH_DIODE="${WITH_DIODE:-false}"
-for _arg in "$@"; do
-    case "$_arg" in
-        --with-diode) WITH_DIODE=true ;;
-        --no-diode) WITH_DIODE=false ;;
-    esac
-done
 
 log()  { echo -e "\n==> $1"; }
 warn() { echo -e "\n!!  $1" >&2; }
@@ -98,7 +70,7 @@ CURRENT_USER="${SUDO_USER:-$USER}"
 # --------------------------------------------------------------------
 # 1. Dependências de sistema
 # --------------------------------------------------------------------
-log "1/8 Dependências do sistema..."
+log "1/7 Dependências do sistema..."
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     case "${ID:-}" in
@@ -111,19 +83,16 @@ fi
 
 if command -v apt-get >/dev/null 2>&1; then
     $SUDO apt-get update -y
-    # jq é usado pelo quickstart.sh do Diode (ver seção 2.3 do README) --
-    # instalado aqui de cara pra já estar pronto se você for usar Diode
-    # depois, sem precisar voltar e instalar na mão. snmp (snmpget/
-    # snmpwalk) é usado pelo automation-scripts/discovery_netbox.py.
-    $SUDO apt-get install -y git curl ca-certificates gnupg nmap python3 python3-venv python3-pip openssl jq snmp
+    # snmp (snmpget/snmpwalk) é usado pelo automation-scripts/discovery_netbox.py.
+    $SUDO apt-get install -y git curl ca-certificates gnupg nmap python3 python3-venv python3-pip openssl snmp
 else
-    warn "apt-get não encontrado. Instale manualmente: git curl nmap python3 python3-venv python3-pip openssl jq snmp"
+    warn "apt-get não encontrado. Instale manualmente: git curl nmap python3 python3-venv python3-pip openssl snmp"
 fi
 
 # --------------------------------------------------------------------
 # 2. Docker Engine + Compose plugin
 # --------------------------------------------------------------------
-log "2/8 Verificando Docker..."
+log "2/7 Verificando Docker..."
 if ! command -v docker >/dev/null 2>&1; then
     echo "    Docker não encontrado, instalando via script oficial (get.docker.com)..."
     curl -fsSL https://get.docker.com | $SUDO sh
@@ -146,7 +115,7 @@ fi
 # --------------------------------------------------------------------
 # 3. Garantir que temos o template localmente
 # --------------------------------------------------------------------
-log "3/8 Localizando/obtendo o template..."
+log "3/7 Localizando/obtendo o template..."
 # Quando rodado via "curl | bash" não existe arquivo de script real,
 # então BASH_SOURCE[0] vem vazio -- com "set -u" isso quebraria sem o
 # ":-" abaixo. Nesse caso SCRIPT_DIR cai pro diretório atual (ex:
@@ -182,7 +151,7 @@ chmod +x setup.sh bootstrap.sh 2>/dev/null || true
 # --------------------------------------------------------------------
 # 4. setup.sh: clona netbox-docker oficial + aplica overlay + cria .env
 # --------------------------------------------------------------------
-log "4/8 Preparando a stack..."
+log "4/7 Preparando a stack..."
 ./setup.sh
 
 ENV_FILE="$REPO_DIR/netbox-docker/.env"
@@ -278,7 +247,7 @@ if grep -q "DISCOVERY_UI_SECRET_KEY=troque-esta-chave-aleatoria" "$ENV_FILE" 2>/
 fi
 
 # --------------------------------------------------------------------
-# 6. Catálogo de device types (netbox-seed/device-catalog.sql) -- SÓ
+# 5. Catálogo de device types (netbox-seed/device-catalog.sql) -- SÓ
 # roda na 1ª instalação, quando o banco Postgres ainda está vazio.
 # O dump é um pg_dump COMPLETO (schema + dados), gerado a partir de uma
 # instalação já catalogada com manufacturers/device types/templates de
@@ -289,7 +258,7 @@ fi
 # restaurar; se já existir, é uma reinstalação/atualização sobre um
 # banco que já tem dado real, e não tocamos em nada.
 # --------------------------------------------------------------------
-log "5/8 Catálogo de device types..."
+log "5/7 Catálogo de device types..."
 SEED_SQL="$REPO_DIR/netbox-seed/device-catalog.sql"
 if [ ! -f "$SEED_SQL" ]; then
     echo "    netbox-seed/device-catalog.sql não encontrado, pulando."
@@ -339,148 +308,7 @@ else
 fi
 
 # --------------------------------------------------------------------
-# 7. Diode (ligado por padrão -- desative com WITH_DIODE=false ou --no-diode)
-# --------------------------------------------------------------------
-if [ "$WITH_DIODE" = "true" ]; then
-    log "6/8 Subindo o Diode..."
-    # Roda antes do build do NetBox de propósito: assim o plugins.py já
-    # sai do build com as credenciais certas, sem precisar rebuildar
-    # duas vezes. Se algo falhar aqui, avisamos e seguimos com o resto
-    # da instalação normalmente -- Diode é opcional, não deve travar o
-    # NetBox em si.
-    if ! command -v jq >/dev/null 2>&1; then
-        warn "jq não encontrado -- pulando setup automático do Diode. Instale jq e siga a seção 2.3 do README manualmente."
-    else
-        mkdir -p "$DIODE_DIR"
-        DIODE_LOG="$DIODE_DIR/install.log"
-        DIODE_OK=true
-        (
-            cd "$DIODE_DIR"
-            if [ ! -f quickstart.sh ]; then
-                curl -sSfLo quickstart.sh https://raw.githubusercontent.com/netboxlabs/diode/release/diode-server/docker/scripts/quickstart.sh
-                chmod +x quickstart.sh
-            fi
-            # quickstart.sh + docker compose up são barulhentos (pull de
-            # imagem, etc.) -- manda pra um log em vez de poluir a tela;
-            # a mensagem final resume o que importa.
-            ./quickstart.sh "http://${SERVER_IP:-localhost}:8000" < /dev/null > "$DIODE_LOG" 2>&1
-
-            # Pin de versão: a branch "release" (que o quickstart.sh
-            # sempre baixa, sem versão fixa) evolui sem aviso. Confirmado
-            # em produção que a versão atual dela (2.0.0, 22/mai) exige o
-            # plugin netbox_diode_plugin >=1.12.0, que por sua vez exige
-            # NetBox >=4.6.0. Este template fixa NetBox em 4.5.x (por
-            # causa do netbox-topology-views, que ainda não suporta 4.6 --
-            # ver plugin_requirements.txt), então isso quebra a ingestão
-            # de forma silenciosa: o diode-reconciler chama
-            # /api/plugins/diode/bulk-plan-apply/, endpoint que só existe
-            # a partir do plugin 1.12.0. Com o plugin 1.7.0 (o que está
-            # pinado aqui), esse endpoint dá 404 -- login e ingestão no
-            # Diode funcionam normalmente, mas nada cai no IPAM do NetBox.
-            # A última leva de imagens anterior a essa mudança (13/jan,
-            # release com "NetBox 4.5.x support") ainda usa
-            # apply-change-set/generate-diff, compatível com plugin
-            # 1.7.0-1.11.0 / NetBox 4.5.x -- mas os 3 serviços do Diode
-            # NÃO compartilham numeração de versão: diode-ingester e
-            # diode-reconciler pararam em 1.13.0 nessa leva, diode-auth
-            # em 1.12.0 (confirmado nas tags do Docker Hub -- não existe
-            # netboxlabs/diode-auth:1.13.0). Por isso um único DIODE_TAG
-            # não pina os três; sobrescrevemos a imagem do diode-auth via
-            # override em vez de usar DIODE_TAG global. Ver README seção
-            # 2.3.
-            if ! grep -q '^DIODE_TAG=' .env 2>/dev/null; then
-                echo "DIODE_TAG=1.13.0" >> .env
-            fi
-            cat > docker-compose.override.yml <<'DIODEPIN'
-services:
-  diode-auth:
-    image: netboxlabs/diode-auth:1.12.0
-  diode-auth-bootstrap:
-    image: netboxlabs/diode-auth:1.12.0
-DIODEPIN
-
-            docker compose up -d < /dev/null >> "$DIODE_LOG" 2>&1
-        ) || DIODE_OK=false
-
-        if [ "$DIODE_OK" = "true" ] && [ -f "$DIODE_DIR/oauth2/client/client-credentials.json" ]; then
-            DIODE_PORT="$(grep -oP 'DIODE_NGINX_PORT=\K[0-9]+' "$DIODE_DIR/.env" 2>/dev/null || echo 8080)"
-            DIODE_SECRET="$(jq -r '.[] | select(.client_id=="netbox-to-diode") | .client_secret' "$DIODE_DIR/oauth2/client/client-credentials.json" 2>/dev/null || echo "")"
-
-            # Bug conhecido: o client "netbox-to-diode" criado pelo
-            # quickstart.sh só aceita autenticação via "client_secret_post",
-            # mas o netbox_diode_plugin manda "client_secret_basic" -- o
-            # Hydra rejeita com 401 (confirmado em produção, ver logs do
-            # Hydra). Clients criados via "authmanager create-client" (CLI)
-            # aceitam client_secret_basic, então recriamos com o MESMO
-            # secret pra corrigir sem precisar tocar no plugins.py de novo.
-            if [ -n "$DIODE_SECRET" ]; then
-                # "docker compose up -d" (chamado logo acima) retorna assim
-                # que os containers INICIAM, não quando o Hydra termina de
-                # subir de verdade -- rodar o authmanager imediatamente
-                # depois pode cair numa corrida e falhar por conexão
-                # recusada. Tenta com retry (até ~30s) em vez de desistir
-                # na primeira falha.
-                DIODE_AUTH_FIX_OK=false
-                for _fix_try in 1 2 3 4 5 6 7 8 9 10; do
-                    # "< /dev/null" em cada "docker compose run" é essencial
-                    # aqui: sem isso, o processo docker herda o stdin do
-                    # bash, que em "curl | bash" É o pipe que ainda está
-                    # entregando o RESTO deste script. O docker CLI então
-                    # rouba esses bytes do pipe (mesmo sem o comando dentro
-                    # do container ler nada), fazendo o bash perder o resto
-                    # do script e terminar em silêncio (sem erro, sem
-                    # warn) -- foi exatamente isso que causou o script
-                    # parar logo após o bloco do Diode, sem chegar no
-                    # build/up do NetBox. Só reproduz via "curl | bash"
-                    # (script rodado de arquivo local não tem esse
-                    # problema, daí não pegamos isso antes).
-                    if (
-                        cd "$DIODE_DIR"
-                        docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode < /dev/null
-                        docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope "diode:read diode:write" --client-secret="$DIODE_SECRET" < /dev/null
-                    ) >> "$DIODE_LOG" 2>&1; then
-                        DIODE_AUTH_FIX_OK=true
-                        break
-                    fi
-                    sleep 3
-                done
-                if [ "$DIODE_AUTH_FIX_OK" != "true" ]; then
-                    warn "Não consegui recriar o client netbox-to-diode com o método de auth correto (mesmo com retry) -- detalhes em $DIODE_LOG. Se o NetBox mostrar 401 nos logs ao consultar o Diode, rode manualmente (seção 2.3 do README): docker compose run --rm --no-deps diode-auth authmanager delete-client --client-id netbox-to-diode && docker compose run --rm --no-deps diode-auth authmanager create-client --client-id netbox-to-diode --scope \"diode:read diode:write\" --client-secret=\"\$SECRET\""
-                fi
-            fi
-
-            PLUGINS_PY="$REPO_DIR/netbox-docker/configuration/plugins.py"
-            if [ -n "$DIODE_SECRET" ] && [ -f "$PLUGINS_PY" ]; then
-                sed -i "s|\"diode_target_override\": \"grpc://diode.local:8080/diode\",|\"diode_target_override\": \"grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode\",|" "$PLUGINS_PY"
-                sed -i "s|\"netbox_to_diode_client_secret\": \"PREENCHER_APOS_QUICKSTART_DIODE\",|\"netbox_to_diode_client_secret\": \"${DIODE_SECRET}\",|" "$PLUGINS_PY"
-                echo "    Diode no ar. Log: $DIODE_LOG"
-                DIODE_INGEST_SECRET="$(jq -r '.[] | select(.client_id=="diode-ingest") | .client_secret' "$DIODE_DIR/oauth2/client/client-credentials.json" 2>/dev/null || echo "")"
-
-                # Deixa o Orb Agent pronto pra usar -- só falta o operador
-                # editar os "targets" (subnets do cliente) e iniciar o
-                # container (não iniciamos sozinhos: escanear rede às
-                # cegas com subnets de exemplo não serve pra nada).
-                AGENT_YAML="$REPO_DIR/orb-agent/agent.yaml"
-                AGENT_EXAMPLE="$REPO_DIR/orb-agent/agent.yaml.example"
-                if [ -n "$DIODE_INGEST_SECRET" ] && [ -f "$AGENT_EXAMPLE" ] && [ ! -f "$AGENT_YAML" ]; then
-                    sed -e "s|target: grpc://SEU_DIODE_HOST:8080/diode|target: grpc://${SERVER_IP:-localhost}:${DIODE_PORT}/diode|" \
-                        -e "s|client_secret: SUBSTITUA_PELO_SECRET_REAL|client_secret: ${DIODE_INGEST_SECRET}|" \
-                        "$AGENT_EXAMPLE" > "$AGENT_YAML"
-                    echo "    orb-agent/agent.yaml criado."
-                fi
-            else
-                warn "Diode subiu mas não consegui extrair o secret/plugins.py automaticamente. Siga a seção 2.3 do README (passo 2) na mão."
-            fi
-        else
-            warn "Falha ao subir o Diode automaticamente -- detalhes em $DIODE_LOG. Siga a seção 2.3 do README na mão, ou rode de novo depois: cd $DIODE_DIR && docker compose up -d"
-        fi
-    fi
-else
-    log "6/8 Diode desativado (WITH_DIODE=false)."
-fi
-
-# --------------------------------------------------------------------
-# 8. Build da imagem e subida da stack
+# 6. Build da imagem e subida da stack
 # --------------------------------------------------------------------
 # Saída 100% nativa do Docker direto na tela (sem pipe/tee/redirect --
 # qualquer um desses faz o Docker achar que não está num terminal de
@@ -492,10 +320,10 @@ fi
 # relação com a saída do "up -d" em si.
 NETBOX_UP_LOG="$REPO_DIR/netbox-docker/up.log"
 
-log "7/8 Build da imagem (com plugins)..."
+log "6/7 Build da imagem (com plugins)..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty build --no-cache < /dev/null)
 
-log "8/8 Subindo a stack..."
+log "7/7 Subindo a stack..."
 (cd "$REPO_DIR/netbox-docker" && docker compose --progress=tty up -d < /dev/null)
 echo "    Stack no ar."
 
@@ -541,33 +369,6 @@ u.save()
     fi
 fi
 
-DIODE_PENDENCIA_LINE=""
-if [ "$WITH_DIODE" != "true" ]; then
-    DIODE_PENDENCIA_LINE="
-Diode/Orb Agent (descoberta de rede opcional, seção 2.3 do README) não
-foi ligado -- use WITH_DIODE=true / --with-diode se quiser mesmo assim."
-fi
-
-DIODE_SUMMARY=""
-if [ "$WITH_DIODE" = "true" ] && [ -n "${DIODE_INGEST_SECRET:-}" ]; then
-    DIODE_SUMMARY="
-Diode já está no ar e $REPO_DIR/orb-agent/agent.yaml já foi criado com
-as credenciais certas (client_id/client_secret/target). Falta só:
-  1. Editar os 'targets' nele com as subnets/blocos reais do cliente
-  2. Rodar (seção 2.3 do README, passo 3):
-     cd $REPO_DIR/orb-agent && docker run -d --name orb-agent --net=host \\
-       --restart unless-stopped -v \"\$(pwd)\":/opt/orb/ \\
-       netboxlabs/orb-agent:latest run -c /opt/orb/agent.yaml
-Não iniciamos o container sozinhos de propósito -- rodar com as
-subnets de exemplo do .example não serve pra nada.
-"
-elif [ "$WITH_DIODE" = "true" ]; then
-    DIODE_SUMMARY="
-Diode foi solicitado (WITH_DIODE=true) mas algo falhou no setup
-automático -- confira acima e siga a seção 2.3 do README na mão.
-"
-fi
-
 cat <<EOF
 
 ==========================================================================
@@ -578,12 +379,11 @@ Usuário:       $(grep '^SUPERUSER_NAME=' "$ENV_FILE" | cut -d= -f2)
 Senha:         $(grep '^SUPERUSER_PASSWORD=' "$ENV_FILE" | cut -d= -f2)
 API Token:     $(grep '^SUPERUSER_API_TOKEN=' "$ENV_FILE" | cut -d= -f2)
 
-Descoberta de rede (interface web, sem Diode):
+Descoberta de rede (interface web):
 URL:           http://${SERVER_IP:-SEU_SERVIDOR}:5050
 Usuário:       $(grep '^DISCOVERY_UI_USER=' "$ENV_FILE" | cut -d= -f2)
 Senha:         $(grep '^DISCOVERY_UI_PASSWORD=' "$ENV_FILE" | cut -d= -f2)
 
 *** Anote as senhas e o token acima agora — eles não aparecem de novo. ***
-${DIODE_PENDENCIA_LINE}
-${DIODE_SUMMARY}==========================================================================
+==========================================================================
 EOF

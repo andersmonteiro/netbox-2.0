@@ -2,9 +2,9 @@
 """
 discover_network.py
 ====================
-Descoberta de rede leve (fallback ao Diode/orb-agent — use quando quiser
-algo simples, sem subir a stack completa do Diode). Faz um scan de uma
-subnet com nmap, identifica hosts ativos e cria/atualiza no NetBox:
+Descoberta de rede leve — use quando quiser algo simples, sem SSH/SNMP
+por device (ver discovery-ui/discovery_netbox.py pra isso). Faz um scan
+de uma subnet com nmap, identifica hosts ativos e cria/atualiza no NetBox:
 
   - um endereço IP (status "active") para cada host respondendo
   - opcionalmente um Device "staged" (para revisão manual) quando o nmap
