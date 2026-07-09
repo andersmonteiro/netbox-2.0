@@ -20,6 +20,12 @@ COPY discovery-ui/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY automation-scripts/discovery_core.py .
+# Script de migração one-off (cifra discovery_password que ainda estiver
+# em texto puro, ver encrypt_secret()/decrypt_secret() em
+# discovery_core.py) -- copiado igual discovery_core.py (achatado direto
+# em /app, não dentro de automation-scripts/) pra rodar como
+# "docker compose exec netbox-oracle python encrypt_existing_secrets.py".
+COPY automation-scripts/encrypt_existing_secrets.py .
 COPY discovery-ui/app.py .
 COPY discovery-ui/templates ./templates
 
