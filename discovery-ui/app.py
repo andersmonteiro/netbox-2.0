@@ -406,6 +406,15 @@ def _build_row(d):
         "method_list": (["ssh", "snmp"] if method == "both" else [method] if method else []),
         "has_cred": has_cred,
         "has_ssh_cred": has_ssh_cred,
+        # Usado pra colorir os chips SSH/SNMP no dashboard (estilo
+        # Zabbix: cinza = protocolo não selecionado, verde = selecionado
+        # e com credencial completa, vermelho = selecionado mas faltando
+        # credencial -- ver _device_row.html). platform_resolved entra no
+        # SSH porque sem um device_type Netmiko reconhecido, o SSH nunca
+        # funciona mesmo com usuário/senha certos (mesmo critério do
+        # not_ready_reason acima).
+        "ssh_configured": has_ssh_cred_pair and platform_resolved,
+        "snmp_configured": has_community,
         # Platform (override opcional de device_type) só é obrigatório
         # quando o método envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
         "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or platform_resolved)),

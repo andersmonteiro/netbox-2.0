@@ -390,17 +390,23 @@
   }
 
   function renderMethodView(viewEl, methodValue) {
-    var parts = [];
-    if (!methodValue) {
-      parts.push('<span class="badge bg-secondary-lt">não configurado</span>');
-    } else {
-      if (methodValue === 'ssh' || methodValue === 'both') {
-        parts.push('<span class="badge bg-teal-lt badge-method method-chip">SSH<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span></span>');
-      }
-      if (methodValue === 'snmp' || methodValue === 'both') {
-        parts.push('<span class="badge bg-teal-lt badge-method method-chip">SNMP<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span></span>');
-      }
-    }
+    // Re-render OTIMISTA e provisório -- só usado no instante entre o
+    // clique e a resposta do servidor (ver closeEditorAndMaybeSave() /
+    // saveRow() logo abaixo, que troca a linha inteira pelo HTML real
+    // vindo de _device_row.html assim que a gravação confirma). Por
+    // isso os chips selecionados aqui ficam num teal neutro ("marcado,
+    // salvando...") em vez de verde/vermelho -- decidir se a credencial
+    // está completa (pra colorir certo, ver ssh_configured/
+    // snmp_configured em app.py:_build_row) é responsabilidade do
+    // servidor, não dá pra replicar aqui sem duplicar aquela lógica.
+    var sshOn = methodValue === 'ssh' || methodValue === 'both';
+    var snmpOn = methodValue === 'snmp' || methodValue === 'both';
+    var parts = [
+      '<span class="badge badge-method method-chip ' + (sshOn ? 'bg-teal-lt' : 'bg-secondary-lt') + '">SSH' +
+        (sshOn ? '<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span>' : '') + '</span>',
+      '<span class="badge badge-method method-chip ' + (snmpOn ? 'bg-teal-lt' : 'bg-secondary-lt') + '">SNMP' +
+        (snmpOn ? '<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span>' : '') + '</span>',
+    ];
     viewEl.innerHTML = parts.join(' ');
   }
 

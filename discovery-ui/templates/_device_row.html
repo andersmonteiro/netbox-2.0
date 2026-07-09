@@ -57,9 +57,14 @@
   </td>
   <td class="method-cell">
     <span class="method-view" tabindex="0">
-      {% if 'ssh' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SSH<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span></span>{% endif %}
-      {% if 'snmp' in r.method_list %}<span class="badge bg-teal-lt badge-method method-chip">SNMP<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span></span>{% endif %}
-      {% if not r.method_list %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
+      {# Estilo Zabbix: os dois protocolos SEMPRE aparecem -- cinza quando
+         não fazem parte do Método escolhido, verde quando selecionado e
+         com credencial completa (ssh_configured/snmp_configured, ver
+         app.py:_build_row), vermelho quando selecionado mas falta
+         credencial. Dá pra ver de longe qual protocolo específico está
+         faltando configurar, sem precisar abrir a linha. #}
+      <span class="badge badge-method method-chip {% if 'ssh' in r.method_list %}{{ 'bg-success-lt' if r.ssh_configured else 'bg-red-lt' }}{% else %}bg-secondary-lt{% endif %}">SSH{% if 'ssh' in r.method_list %}<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span>{% endif %}</span>
+      <span class="badge badge-method method-chip {% if 'snmp' in r.method_list %}{{ 'bg-success-lt' if r.snmp_configured else 'bg-red-lt' }}{% else %}bg-secondary-lt{% endif %}">SNMP{% if 'snmp' in r.method_list %}<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span>{% endif %}</span>
     </span>
     <div class="method-editor" style="display:none">
       <label class="form-check mb-1"><input type="checkbox" class="form-check-input method-opt" value="ssh" {% if 'ssh' in r.method_list %}checked{% endif %}> SSH</label>
