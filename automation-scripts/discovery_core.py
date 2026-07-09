@@ -860,7 +860,9 @@ def _ensure_prefix(nb, device, ip_str, seen_prefixes):
     'seen_prefixes' é um set compartilhado entre chamadas dentro do
     mesmo apply_device_result() -- evita bater na API de novo pro
     mesmo prefixo quando várias interfaces do device caem na mesma
-    sub-rede (comum: várias VLANs/portas na mesma rede de gerência).
+    sub-rede (comum: várias VLANs/portas na mesma rede de gerência), e
+    também serve pra reportar quantos prefixos DISTINTOS (novos ou já
+    existentes) participaram desse apply na mensagem de confirmação.
 
     Retorna True se criou um prefixo novo."""
     try:
@@ -1016,8 +1018,11 @@ def apply_device_result(nb, device, data, interface_filter=None):
         changes.append(f"{linked} VLAN(s) vinculada(s) à interface física")
     if ip_written:
         changes.append(f"{ip_written} IP(s) gravado(s)/associado(s) no IPAM")
-    if prefixes_created:
-        changes.append(f"{prefixes_created} prefixo(s) criado(s) no IPAM")
+    if seen_prefixes:
+        if prefixes_created:
+            changes.append(f"{len(seen_prefixes)} prefixo(s) no IPAM ({prefixes_created} novo(s))")
+        else:
+            changes.append(f"{len(seen_prefixes)} prefixo(s) confirmado(s) no IPAM")
 
     return changes
 
