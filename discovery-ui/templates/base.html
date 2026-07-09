@@ -250,6 +250,15 @@
           </svg>
           <span class="fw-bold">netbox<span class="accent">oracle</span></span>
         </a>
+        {% if not session.get('logged_in') %}
+        <!-- Sem sessão (tela de login) -- só o toggle de tema, sozinho,
+             lá na ponta direita. O resto (status API / usuário) só faz
+             sentido logado. -->
+        <a href="#" class="ms-auto nav-link" id="theme-toggle-btn" title="Alternar tema claro/escuro"
+           style="display:flex !important; align-items:center !important;">
+          <i class="ti" id="theme-toggle-icon"></i>
+        </a>
+        {% endif %}
         {% if session.get('logged_in') %}
         <!-- Menu (Devices/Revisão) logo depois da logo, mesma linha --
              sem a barra horizontal separada de baixo que o layout padrão
@@ -322,7 +331,7 @@
         <div class="container-xl">
           <div class="row justify-content-center text-center align-items-center">
             <div class="col-12 col-lg-auto mt-lg-0">
-              <ul class="list-inline list-inline-dots mb-0 text-secondary" style="font-size: .75rem;">
+              <ul class="list-inline list-inline-dots mb-0 text-secondary" style="font-size: .65rem;">
                 <li class="list-inline-item">Desenvolvido por Anderson Monteiro</li>
                 <li class="list-inline-item">Todos os direitos reservados &copy; 2026</li>
               </ul>
