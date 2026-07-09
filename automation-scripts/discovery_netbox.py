@@ -4,7 +4,7 @@ discovery_netbox.py
 ====================
 CLI de descoberta: lê Devices do NetBox que tiverem os custom fields de
 descoberta preenchidos (ver create_discovery_fields.py), coleta dados
-reais via SSH (NAPALM) ou SNMP (SNMPv2c) usando discovery_core.py, grava
+reais via SSH (Netmiko) ou SNMP (SNMPv2c) usando discovery_core.py, grava
 o resultado em JSON para revisão humana, e só aplica no NetBox depois de
 confirmação explícita.
 

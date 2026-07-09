@@ -1,14 +1,12 @@
 pynetbox>=7.4,<8
 pandas>=2.2
 openpyxl>=3.1
-napalm>=5.0
-# Driver comunitário -- "huawei_vrp" não vem embutido no napalm core (só
-# eos/ios/iosxr/junos/nxos/nxos_ssh/panos vêm), mas boa parte do catálogo
-# de device types deste projeto é Huawei (NE8000 etc.), então instalamos
-# à parte. napalm.get_network_driver() importa isso automaticamente
-# quando o Platform.slug do device é "huawei_vrp".
-napalm-huawei-vrp>=1.0
 netmiko>=4.3
+# Templates TextFSM usados pelo Netmiko (send_command(..., use_textfsm=
+# True)) pra estruturar a saída de comandos "show"/"display" por
+# fabricante -- substitui o NAPALM como camada de parsing (ver
+# discovery_core.collect_ssh()/_ssh_collect_textfsm()).
+ntc-templates>=6.0
 python-dotenv>=1.0
 # Cifra a senha de descoberta (discovery_password) antes de gravar no
 # NetBox -- ver encrypt_secret()/decrypt_secret() em discovery_core.py.

@@ -30,10 +30,9 @@ netbox-2.0/
 ├── plugin_requirements.txt         <- lista de plugins (pip)
 ├── configuration/
 │   └── plugins.py                  <- plugins habilitados no NetBox
-├── automation-scripts/             <- scripts pynetbox/napalm/nmap/snmp
+├── automation-scripts/             <- scripts pynetbox/netmiko/nmap/snmp
 │   ├── requirements.txt
 │   ├── import_csv_to_netbox.py     <- importação em massa (CSV/XLSX)
-│   ├── napalm_collect.py           <- coleta via SSH/API (NAPALM)
 │   ├── discover_network.py         <- descoberta de rede (nmap, fallback)
 │   ├── create_discovery_fields.py  <- cria os custom fields de credencial no NetBox
 │   ├── discovery_core.py           <- lógica compartilhada (coleta SSH/SNMP + apply), usada pelo CLI e pela discovery-ui
@@ -224,8 +223,9 @@ tabela primeiro.
 
 Você pediu três frentes — seguem as três, cada uma resolvendo um cenário
 diferente. Elas não se excluem: normalmente se usa CSV para a carga
-inicial, NAPALM para manter os devices já cadastrados atualizados, e
-scan/descoberta para achar o que ainda não está no NetBox.
+inicial, a descoberta via SSH/SNMP (seção 2.4) para manter os devices já
+cadastrados atualizados, e scan/descoberta para achar o que ainda não
+está no NetBox.
 
 ### 2.1 Importação em massa via CSV/Excel
 
@@ -248,20 +248,29 @@ Colunas esperadas: veja o docstring no topo de cada função no script.
 Ele foi feito para ser fácil de adaptar caso sua planilha use nomes de
 coluna diferentes.
 
-### 2.2 Coleta automática via SSH/API (NAPALM)
+### 2.2 Coleta automática via SSH/SNMP
 
-`automation-scripts/napalm_collect.py` conecta nos devices que **já
-existem** no NetBox (usando o IP de gerência e a `platform` cadastrados)
-e preenche automaticamente número de série e interfaces.
+Pra devices que **já existem** no NetBox (cadastrados via CSV no passo
+2.1, por exemplo) e você quer completar automaticamente com número de
+série, versão de SO e interfaces reais do equipamento, use
+`automation-scripts/discovery_netbox.py` -- é o mesmo CLI de descoberta
+detalhado na seção 2.4, só que puxando os devices direto pelas
+credenciais já cadastradas no NetBox (Custom Fields) em vez de você
+digitar usuário/senha na hora:
 
 ```bash
-python napalm_collect.py --site "Matriz" --username admin --password 'senha'
+cd automation-scripts
+python discovery_netbox.py collect --site "Matriz"
+python discovery_netbox.py apply
 ```
 
-Pré-requisito: o Device no NetBox precisa ter `platform` (driver NAPALM:
-`ios`, `eos`, `junos`, `nxos_ssh`, `iosxr`...) e `primary_ip4`
-preenchidos — normalmente você cadastra isso via CSV (passo 2.1) e este
-script completa o resto.
+Pré-requisito: o Device no NetBox precisa ter os custom fields de
+descoberta preenchidos (`discovery_method` + credencial correspondente
+-- ver `create_discovery_fields.py`) e `primary_ip4` definido. A coleta
+via SSH é feita com Netmiko puro (sem NAPALM) -- o jeito de conectar é
+resolvido automaticamente pelo Fabricante do device (Cisco/Juniper/
+Arista/Palo Alto/Huawei); veja a seção 2.4 pra detalhes completos do
+fluxo (revisão humana antes de gravar, etc.).
 
 ### 2.3 Descoberta de rede
 
@@ -286,7 +295,7 @@ sempre passa por um passo explícito de confirmação.
 ```mermaid
 flowchart TD
     NB["NetBox<br/>Custom fields, IP, Platform"] --> C["collect<br/>lê custom fields do device"]
-    C --> SSH["SSH (NAPALM)<br/>usuário + senha"]
+    C --> SSH["SSH (Netmiko)<br/>usuário + senha"]
     C --> SNMP["SNMP (v2c)<br/>community"]
     SSH --> EQ["Equipamento real<br/>na rede do cliente"]
     SNMP --> EQ
@@ -367,8 +376,8 @@ coleta:
 python discovery_netbox.py collect
 ```
 
-Isso conecta em cada device marcado (SSH via NAPALM, mesmo driver do
-`napalm_collect.py`; SNMPv2c via `snmpget`/`snmpwalk` — instale o
+Isso conecta em cada device marcado (SSH via Netmiko puro, device_type
+resolvido pelo Fabricante; SNMPv2c via `snmpget`/`snmpwalk` — instale o
 pacote `snmp` do sistema se não usou o `bootstrap.sh`) e grava um JSON
 por device em `discovery_output/` com hostname, interfaces e status
 up/down de cada uma. **Nada é gravado no NetBox ainda.**
@@ -387,7 +396,7 @@ python discovery_netbox.py apply
 Pede confirmação (`y/N`) antes de gravar — use `apply --yes` se quiser
 pular a pergunta (ex: rodando via cron depois que já confiar no
 processo). Cria as interfaces que faltam, atualiza status/descrição das
-que já existem e o serial do device (quando veio via SSH/NAPALM — SNMP
+que já existem e o serial do device (quando veio via SSH — SNMP
 não traz serial pela MIB-II padrão). Os arquivos aplicados são movidos
 pra `discovery_output/applied/` (não ficam pendentes de novo se você
 rodar `apply` de novo sem um `collect` novo antes).
@@ -485,18 +494,20 @@ tela.
 
 **Cliente com IPAM já preenchido**: se o NetBox do cliente já tem IPs
 cadastrados de antes (comum — endereço de gerência já documentado com
-outro prefixo, ex: um `/30` de um link), o Oracle detecta o conflito
-automaticamente e reaproveita o registro existente em vez de tentar
-criar um duplicado. Só aparece um erro se esse IP já estiver associado
-a **outro device** no NetBox — nesse caso, ajuste manualmente em IPAM >
-IP Addresses antes de tentar salvar de novo.
+outro prefixo, ex: um `/30` de um link, ou já associado a outro device/
+interface, ou já marcado como Primary IP de outro device), o Oracle
+detecta o conflito automaticamente e REASSOCIA o registro existente pra
+cá em vez de bloquear — o que foi digitado na tela do Oracle é tratado
+como fonte de verdade de onde aquele IP está fisicamente hoje. Isso
+desassocia o IP de onde estava antes, então confira o valor digitado
+antes de salvar.
 
 ## 4. Ordem sugerida de implementação
 
 1. Suba o NetBox (seção 1) e crie o superusuário.
 2. Cadastre a estrutura básica manualmente ou via CSV: Sites, Manufacturers,
    Device Types, Device Roles (seção 2.1).
-3. Rode o NAPALM collector para enriquecer os devices já cadastrados
+3. Rode a coleta via SSH/SNMP para enriquecer os devices já cadastrados
    (seção 2.2).
 4. Cadastre as credenciais de descoberta pela discovery-ui e rode as
    primeiras descobertas (seção 2.4).
@@ -563,8 +574,4 @@ recriar o repositório.
 
 ## Fontes usadas na pesquisa deste projeto
 
-- [netbox-community/netbox-docker](https://github.com/netbox-community/netbox-docker)
-- [Using NetBox Plugins (wiki)](https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins)
-- [netbox-community/netbox-topology-views](https://github.com/netbox-community/netbox-topology-views) (tabela de compatibilidade no README)
-- [netbox-community/netbox-qrcode](https://github.com/netbox-community/netbox-qrcode) (COMPATIBILITY.md)
-- [netboxcommunity/netbox tags (Docker Hub)](https://hub.docker.com/r/netboxcommunity/netbox/tags) — usado para confirmar qual patch a tag `v4.5` aponta hoje
+- [netbox-community/net

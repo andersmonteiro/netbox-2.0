@@ -15,8 +15,8 @@
   data-manufacturer="{{ r.manufacturer }}"
   data-device-type-model="{{ r.device_type_model }}"
   {#- Calculado no servidor (ver platform_resolved em app.py:_build_row) --
-      dá pra desabilitar o chip "SSH (NAPALM)" no editor de Método pra
-      fabricantes sem driver reconhecido (ex: MikroTik), em vez de deixar
+      dá pra desabilitar o chip "SSH" no editor de Método pra
+      fabricantes sem device_type reconhecido (ex: MikroTik), em vez de deixar
       escolher "SSH + SNMP" e o device nunca conseguir ficar "pronto". #}
   data-platform-resolved="{{ 'true' if r.platform_resolved else 'false' }}"
 >
@@ -62,7 +62,7 @@
       {% if not r.method_list %}<span class="badge bg-secondary-lt">não configurado</span>{% endif %}
     </span>
     <div class="method-editor" style="display:none">
-      <label class="form-check mb-1"><input type="checkbox" class="form-check-input method-opt" value="ssh" {% if 'ssh' in r.method_list %}checked{% endif %}> SSH (NAPALM)</label>
+      <label class="form-check mb-1"><input type="checkbox" class="form-check-input method-opt" value="ssh" {% if 'ssh' in r.method_list %}checked{% endif %}> SSH</label>
       <label class="form-check mb-0"><input type="checkbox" class="form-check-input method-opt" value="snmp" {% if 'snmp' in r.method_list %}checked{% endif %}> SNMP</label>
     </div>
     <input type="hidden" class="f-method" value="{{ r.method or '' }}">

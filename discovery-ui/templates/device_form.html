@@ -60,7 +60,7 @@
             <label class="form-label">Método de descoberta</label>
             <select name="method" id="method-select" class="form-select" onchange="toggleMethodFields()">
               <option value="">— nenhum —</option>
-              <option value="ssh" {% if cf.discovery_method == "ssh" %}selected{% endif %}>SSH (NAPALM)</option>
+              <option value="ssh" {% if cf.discovery_method == "ssh" %}selected{% endif %}>SSH</option>
               <option value="snmp" {% if cf.discovery_method == "snmp" %}selected{% endif %}>SNMP (v2c)</option>
             </select>
           </div>

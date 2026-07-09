@@ -317,7 +317,7 @@ def _build_row(d):
     elif method == "snmp":
         has_cred = has_community
     elif method == "both":
-        # "both" precisa das DUAS credenciais -- SSH (NAPALM) e SNMP
+        # "both" precisa das DUAS credenciais -- SSH (Netmiko) e SNMP
         # rodam juntos e os resultados são cruzados por interface (ver
         # discovery_core.collect_both()).
         has_cred = has_ssh_cred_pair and has_community
@@ -346,19 +346,20 @@ def _build_row(d):
                 manufacturer = _display_case(str(d.device_type.manufacturer))
     except Exception:
         pass
-    # Platform (driver NAPALM) não é mais um campo que o operador precisa
-    # escolher no dashboard -- é resolvido automaticamente a partir do
-    # Fabricante (ver discovery_core.resolve_platform_slug(), mesma regra
-    # usada em collect_ssh()). Se o device já tiver uma Platform explícita
-    # no NetBox, ela continua valendo (permite override manual); senão,
-    # só conta como "pronto" pra SSH/both se o Fabricante for reconhecido.
-    platform_resolved = bool(d.platform) or bool(core.resolve_platform_slug(manufacturer, device_type_model))
+    # Platform (override manual do device_type) não é mais um campo que o
+    # operador precisa escolher no dashboard -- é resolvido automaticamente
+    # a partir do Fabricante (ver discovery_core.resolve_ssh_device_type(),
+    # mesma regra usada em collect_ssh()). Se o device já tiver uma
+    # Platform explícita no NetBox, ela continua valendo (permite override
+    # manual); senão, só conta como "pronto" pra SSH/both se o Fabricante
+    # for reconhecido.
+    platform_resolved = bool(d.platform) or bool(core.resolve_ssh_device_type(manufacturer, device_type_model))
 
     # Motivo específico de "incompleto" -- sem isso, o operador só via o
     # badge vermelho genérico e a caixa de seleção desabilitada, sem
     # entender o porquê (ex: escolheu method="both" num fabricante tipo
-    # MikroTik, que não tem driver SSH/NAPALM aqui -- ver
-    # _MANUFACTURER_PLATFORM_RULES em discovery_core.py -- então "both"
+    # MikroTik, que não tem device_type SSH reconhecido aqui -- ver
+    # _MANUFACTURER_SSH_RULES em discovery_core.py -- então "both"
     # NUNCA fica pronto pra esse fabricante, mesmo com usuário/senha/
     # community preenchidos). Usado no title da checkbox e do badge de
     # status (ver _device_row.html).
@@ -369,10 +370,10 @@ def _build_row(d):
         not_ready_reason = "Device sem IP de gerência (Primary IPv4) no NetBox."
     elif method in ("ssh", "both") and not platform_resolved:
         not_ready_reason = (
-            "Esse fabricante não tem driver SSH (NAPALM) reconhecido aqui "
-            "(ex: MikroTik e a maioria das OLTs não têm) -- \"SSH + SNMP\" "
+            "Esse fabricante não tem um jeito de conectar via SSH reconhecido "
+            "aqui (ex: MikroTik e a maioria das OLTs não têm) -- \"SSH + SNMP\" "
             "nunca vai ficar pronto pra esse device. Use só SNMP, ou defina "
-            "a Platform manualmente no NetBox se o driver existir."
+            "a Platform manualmente no NetBox com o device_type certo do Netmiko."
         )
     elif not has_cred:
         if method == "both":
@@ -405,8 +406,8 @@ def _build_row(d):
         "method_list": (["ssh", "snmp"] if method == "both" else [method] if method else []),
         "has_cred": has_cred,
         "has_ssh_cred": has_ssh_cred,
-        # Platform (driver NAPALM) só é obrigatório quando o método
-        # envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
+        # Platform (override opcional de device_type) só é obrigatório
+        # quando o método envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
         "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or platform_resolved)),
         "not_ready_reason": not_ready_reason,
         "platform_resolved": platform_resolved,
@@ -490,10 +491,12 @@ def device_new():
         )
     if not platforms:
         flash(
-            "Nenhuma Platform cadastrada no NetBox ainda -- necessário só pro "
-            "método SSH (NAPALM). Crie em NetBox > Devices > Platforms > Add, "
-            "com o Slug igual ao nome do driver NAPALM do fabricante (ex: "
-            "'huawei_vrp', 'cisco_ios', 'juniper_junos').",
+            "Nenhuma Platform cadastrada no NetBox ainda -- opcional, só "
+            "necessário se quiser FORÇAR manualmente como conectar via SSH "
+            "num device específico (o normal é resolver sozinho pelo "
+            "Fabricante). Crie em NetBox > Devices > Platforms > Add, com o "
+            "Slug igual a um device_type válido do Netmiko (ex: 'huawei', "
+            "'cisco_ios', 'juniper_junos').",
             "error",
         )
 
@@ -524,10 +527,12 @@ def device_edit(device_id):
     platforms = list(nb.dcim.platforms.all())
     if not platforms:
         flash(
-            "Nenhuma Platform cadastrada no NetBox ainda -- necessário só pro "
-            "método SSH (NAPALM). Crie em NetBox > Devices > Platforms > Add, "
-            "com o Slug igual ao nome do driver NAPALM do fabricante (ex: "
-            "'huawei_vrp', 'cisco_ios', 'juniper_junos').",
+            "Nenhuma Platform cadastrada no NetBox ainda -- opcional, só "
+            "necessário se quiser FORÇAR manualmente como conectar via SSH "
+            "num device específico (o normal é resolver sozinho pelo "
+            "Fabricante). Crie em NetBox > Devices > Platforms > Add, com o "
+            "Slug igual a um device_type válido do Netmiko (ex: 'huawei', "
+            "'cisco_ios', 'juniper_junos').",
             "error",
         )
     cf = device.custom_fields or {}
@@ -746,7 +751,7 @@ def review():
             # Agrupa por tipo (físicas por velocidade crescente, depois
             # LAG/bridge/virtual) e ordena por nome dentro do mesmo tipo --
             # antes disso a ordem era a que veio da coleta (walk SNMP ou
-            # dict do NAPALM), que não segue tipo nem nome.
+            # lista do TextFSM), que não segue tipo nem nome.
             interfaces.sort(key=core.interface_sort_key)
 
             n_up = sum(1 for i in interfaces if i.get("oper_status") == "up")

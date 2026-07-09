@@ -2,8 +2,8 @@
 """
 discovery_core.py
 ==================
-Lógica compartilhada de descoberta (SSH/NAPALM e SNMP) e aplicação no
-NetBox. Não tem interface própria -- é importado por:
+Lógica compartilhada de descoberta (SSH via Netmiko e SNMP) e aplicação
+no NetBox. Não tem interface própria -- é importado por:
 
   - discovery_netbox.py    (CLI: collect / apply via JSON em disco)
   - discovery-ui/app.py    (interface web: mesmo fluxo, mas com revisão
@@ -408,43 +408,68 @@ def collect_mikrotik_interface_details(host, username, password, port=None):
 
 
 # --------------------------------------------------------------------
-# SSH / NAPALM
+# SSH (Netmiko puro -- sem NAPALM, por decisão do projeto: um único
+# caminho de coleta via SSH em vez de dois mecanismos diferentes
+# (NAPALM pra fabricantes com driver, Netmiko/CLI só pro MikroTik como
+# extra). Usa TextFSM (pacote ntc-templates, carregado automaticamente
+# pelo Netmiko quando use_textfsm=True) pra estruturar a saída dos
+# comandos "show"/"display" -- evita reinventar um parser manual por
+# fabricante, trabalho que bibliotecas mantidas pela comunidade (essa,
+# ou o próprio NAPALM antes) já resolvem de forma testada.
+#
+# Resolve o device_type do Netmiko a partir do Fabricante (Device Type >
+# Manufacturer) em vez de exigir que o operador escolha a Platform
+# manualmente pra cada device -- mesma tabela de regras usada pela
+# sugestão automática no dashboard (MANUFACTURER_RULES, dashboard.html),
+# só que aqui do lado do servidor, pra funcionar mesmo sem a Platform
+# setada no NetBox. Se o device já tiver uma Platform explícita, ela
+# continua tendo prioridade (permite override manual pra casos fora do
+# padrão -- o Slug precisa ser um device_type válido do Netmiko, ex:
+# 'cisco_ios', não mais um driver NAPALM).
 # --------------------------------------------------------------------
-# Resolve o driver NAPALM a partir do Fabricante (Device Type > Manufacturer)
-# em vez de exigir que o operador escolha a Platform manualmente pra cada
-# device -- mesma tabela de regras usada pela sugestão automática no
-# dashboard (MANUFACTURER_RULES, dashboard.html), só que aqui do lado do
-# servidor, pra funcionar mesmo sem a Platform setada no NetBox. Se o
-# device já tiver uma Platform explícita, ela continua tendo prioridade
-# (permite override manual pra casos fora do padrão).
-# --------------------------------------------------------------------
-_MANUFACTURER_PLATFORM_RULES = [
-    (re.compile(r"cisco", re.I), "ios"),
-    (re.compile(r"juniper", re.I), "junos"),
-    (re.compile(r"arista", re.I), "eos"),
-    (re.compile(r"palo\s*alto", re.I), "panos"),
-    (re.compile(r"huawei", re.I), "huawei_vrp"),
+_MANUFACTURER_SSH_RULES = [
+    (re.compile(r"cisco", re.I), "cisco_ios"),
+    (re.compile(r"juniper", re.I), "juniper_junos"),
+    (re.compile(r"arista", re.I), "arista_eos"),
+    (re.compile(r"palo\s*alto", re.I), "paloalto_panos"),
+    (re.compile(r"huawei", re.I), "huawei"),
 ]
 _OLT_PATTERN = re.compile(r"\bolt\b|ma5\d{3}", re.I)
 
+# Comando de interfaces + comando de "facts" (serial/versão) por
+# device_type do Netmiko -- ambos rodados com use_textfsm=True. Não
+# existe um "show interfaces" universal entre fabricantes, e mesmo os
+# nomes dos CAMPOS retornados variam de template pra template -- por
+# isso _pick() abaixo tenta várias chaves candidatas em vez de assumir
+# um nome fixo.
+_SSH_COMMANDS = {
+    "cisco_ios": {"interfaces": "show interfaces", "version": "show version"},
+    "arista_eos": {"interfaces": "show interfaces", "version": "show version"},
+    "juniper_junos": {"interfaces": "show interfaces terse", "version": "show version"},
+    "paloalto_panos": {"interfaces": "show interface all", "version": "show system info"},
+    "huawei": {"interfaces": "display interface", "version": "display version"},
+}
 
-def resolve_platform_slug(manufacturer, device_type_model=None):
-    """Adivinha o slug do driver NAPALM a partir do nome do Fabricante.
-    Retorna None se não reconhecer o fabricante, ou se for um Huawei tipo
-    OLT (esses não têm driver NAPALM confiável -- usam SNMP, ver
-    MANUFACTURER_RULES/oltCheck em dashboard.html, mesma lógica)."""
+
+def resolve_ssh_device_type(manufacturer, device_type_model=None):
+    """Adivinha o device_type do Netmiko a partir do nome do Fabricante
+    (substitui o antigo resolve_platform_slug()/driver NAPALM). Retorna
+    None se não reconhecer o fabricante, ou se for um Huawei tipo OLT
+    (esses não respondem aos comandos VRP normais de forma confiável --
+    usam SNMP, ver MANUFACTURER_RULES/oltCheck em dashboard.html, mesma
+    lógica de antes)."""
     manufacturer = manufacturer or ""
-    for pattern, slug in _MANUFACTURER_PLATFORM_RULES:
+    for pattern, device_type in _MANUFACTURER_SSH_RULES:
         if pattern.search(manufacturer):
-            if slug == "huawei_vrp" and _OLT_PATTERN.search(device_type_model or ""):
+            if device_type == "huawei" and _OLT_PATTERN.search(device_type_model or ""):
                 return None
-            return slug
+            return device_type
     return None
 
 
 def _device_manufacturer_info(device):
     """(manufacturer, device_type_model) como string, best-effort -- usado
-    só pra alimentar resolve_platform_slug()."""
+    só pra alimentar resolve_ssh_device_type()."""
     manufacturer = None
     device_type_model = None
     try:
@@ -457,107 +482,167 @@ def _device_manufacturer_info(device):
     return manufacturer, device_type_model
 
 
-def collect_ssh(device, username, password, port=None):
-    from napalm import get_network_driver  # import tardio: só quem usar SSH precisa do napalm
+def _pick(row, *keys):
+    """Pega o primeiro valor não vazio de 'row' (um dict vindo de uma
+    linha parseada por TextFSM) tentando várias chaves candidatas -- os
+    nomes de campo variam de template pra template do ntc-templates (ex:
+    MAC pode vir como MAC_ADDRESS, ADDRESS ou BIA dependendo do
+    fabricante), então não dá pra assumir um nome fixo."""
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, list):
+            value = value[0] if value else None
+        if value:
+            return str(value).strip()
+    return None
 
-    driver_name = device.platform.slug if device.platform else None
-    if not driver_name:
+
+def _ssh_collect_textfsm(conn, iface_cmd, version_cmd):
+    """Coleta via TextFSM (Netmiko + ntc-templates) -- usada pros
+    fabricantes com device_type reconhecido aqui (Cisco/Arista/Juniper/
+    Palo Alto/Huawei). Normaliza os nomes de campo (que variam entre
+    templates) pro formato comum usado no resto do projeto (name/descr/
+    admin_status/oper_status/mac_address/ip_addresses).
+
+    Retorna (interfaces, serial, os_version, errors). 'errors' fica
+    populado sem levantar exceção quando um comando não tem template
+    TextFSM disponível pro device_type em questão -- nesse caso o
+    Netmiko devolve a STRING crua em vez de uma lista, e a gente avisa o
+    operador em vez de silenciosamente devolver uma lista vazia sem
+    explicação nenhuma."""
+    errors = []
+    interfaces = []
+
+    try:
+        parsed = conn.send_command(iface_cmd, use_textfsm=True)
+    except Exception as exc:
+        return [], None, None, [f"falha ao rodar '{iface_cmd}': {exc}"]
+
+    if not isinstance(parsed, list):
+        errors.append(
+            f"'{iface_cmd}' não tem um template TextFSM disponível pra esse "
+            f"device (saída não veio estruturada) -- sem dados de interface, "
+            f"revise manualmente"
+        )
+        parsed = []
+
+    for row in parsed:
+        name = _pick(row, "INTERFACE", "PORT", "NAME")
+        if not name:
+            continue
+        status_raw = (_pick(row, "LINK_STATUS", "STATUS", "ADMIN_STATE", "PHY", "ADMIN_STATUS") or "").lower()
+        proto_raw = (_pick(row, "PROTOCOL_STATUS", "PROTOCOL", "LINE_PROTOCOL", "LINK_STATE") or "").lower()
+        admin_down = any(word in status_raw for word in ("down", "disable", "shutdown"))
+        oper_up = "up" in proto_raw or ("up" in status_raw and not admin_down)
+        ip_raw = _pick(row, "IP_ADDRESS", "IP", "ADDRESS_IP", "PRIMARY_IP")
+        ip_addresses = []
+        if ip_raw and ip_raw.lower() not in ("unassigned", "none", "-", "n/a"):
+            ip_addresses = [ip_raw]
+        interfaces.append({
+            "name": name,
+            "descr": _pick(row, "DESCRIPTION", "DESC") or "",
+            "admin_status": "down" if admin_down else "up",
+            "oper_status": "up" if oper_up else "down",
+            "mac_address": _pick(row, "MAC_ADDRESS", "ADDRESS", "BIA", "HARDWARE_ADDR"),
+            "ip_addresses": ip_addresses,
+        })
+
+    serial = None
+    os_version = None
+    try:
+        vparsed = conn.send_command(version_cmd, use_textfsm=True)
+    except Exception as exc:
+        vparsed = None
+        errors.append(f"falha ao rodar '{version_cmd}': {exc}")
+
+    if isinstance(vparsed, list) and vparsed:
+        vrow = vparsed[0]
+        serial = _pick(vrow, "SERIAL", "SERIAL_NUMBER", "HARDWARE")
+        os_version = _pick(vrow, "VERSION", "OS_VERSION", "SOFTWARE_VERSION", "RUNNING_IMAGE", "SW_VERSION")
+    elif vparsed is not None:
+        errors.append(
+            f"'{version_cmd}' não tem template TextFSM disponível pra esse "
+            f"device -- sem serial/versão"
+        )
+
+    return interfaces, serial, os_version, errors
+
+
+def collect_ssh(device, username, password, port=None):
+    device_type = device.platform.slug if device.platform else None
+    if not device_type:
         manufacturer, device_type_model = _device_manufacturer_info(device)
-        driver_name = resolve_platform_slug(manufacturer, device_type_model)
-    if not driver_name:
+        device_type = resolve_ssh_device_type(manufacturer, device_type_model)
+    if not device_type:
         return {
             "method": "ssh",
             "errors": [
-                "não consegui adivinhar o driver NAPALM pelo Fabricante -- "
+                "não consegui adivinhar como conectar via SSH pelo Fabricante -- "
                 "confirme se o Device Type tem um Fabricante reconhecido "
                 "(Cisco/Juniper/Arista/Palo Alto/Huawei) ou defina a "
-                "Platform manualmente no device (NetBox > Devices > editar)"
+                "Platform manualmente no device (NetBox > Devices > editar, "
+                "com o Slug igual ao device_type do Netmiko, ex: 'cisco_ios')"
             ],
         }
     if not device.primary_ip4:
         return {"method": "ssh", "errors": ["sem IP de gerência (primary_ip4)"]}
 
+    commands = _SSH_COMMANDS.get(device_type)
+    if not commands:
+        return {
+            "method": "ssh",
+            "errors": [f"device_type '{device_type}' não tem comandos configurados aqui"],
+        }
+
     host = str(device.primary_ip4).split("/")[0]
     data = {"method": "ssh", "host": host, "errors": []}
 
+    from netmiko import ConnectHandler, NetmikoAuthenticationException, NetmikoTimeoutException
+
     try:
-        driver = get_network_driver(driver_name)
-    except Exception as exc:
-        data["errors"].append(f"driver NAPALM '{driver_name}' inválido: {exc}")
+        conn = ConnectHandler(
+            device_type=device_type,
+            host=host,
+            username=username,
+            password=password,
+            port=int(port) if port else 22,
+            timeout=15,
+        )
+    except NetmikoAuthenticationException:
+        data["errors"].append("falha ao conectar: usuário/senha rejeitados pelo device")
         return data
-
-    optional_args = {}
-    if port:
-        try:
-            optional_args["port"] = int(port)
-        except (TypeError, ValueError):
-            pass
-
-    conn = driver(hostname=host, username=username, password=password, optional_args=optional_args or None)
-    try:
-        conn.open()
-        facts = conn.get_facts()
-        napalm_interfaces = conn.get_interfaces()
+    except NetmikoTimeoutException:
+        data["errors"].append("falha ao conectar: timeout (IP/porta inacessível ou SSH não habilitado)")
+        return data
     except Exception as exc:
         data["errors"].append(f"falha ao conectar: {exc}")
-        try:
-            conn.close()
-        except Exception:
-            pass
         return data
 
-    # IP configurado em cada porta -- getter separado do NAPALM
-    # (get_interfaces_ip), opcional: nem todo driver implementa 100%
-    # pra todo vendor, então uma falha aqui não derruba a coleta
-    # principal (interfaces/status já vieram acima).
     try:
-        napalm_ips = conn.get_interfaces_ip()
-    except Exception:
-        napalm_ips = {}
+        interfaces, serial, os_version, errors = _ssh_collect_textfsm(
+            conn, commands["interfaces"], commands["version"]
+        )
     finally:
         try:
-            conn.close()
+            conn.disconnect()
         except Exception:
             pass
 
-    def _ips_for(name):
-        info = napalm_ips.get(name) or {}
-        result = []
-        for family in ("ipv4", "ipv6"):
-            for addr, meta in (info.get(family) or {}).items():
-                prefix = meta.get("prefix_length")
-                result.append(f"{addr}/{prefix}" if prefix is not None else addr)
-        return result
-
-    # Alguns drivers NAPALM (a depender do vendor/versão) devolvem
-    # serial_number como número em vez de string -- o NetBox exige
-    # string no campo "serial" e rejeita com 400 se vier int, então
-    # normaliza aqui na origem (str()) já garante o tipo certo pro
-    # JSON salvo em disco e pro que a tela de revisão mostra.
-    _serial_raw = facts.get("serial_number")
-    data["serial"] = str(_serial_raw).strip() if _serial_raw else None
-    data["os_version"] = facts.get("os_version") or None
-    data["interfaces"] = [
-        {
-            "name": name,
-            "descr": info.get("description") or "",
-            "admin_status": "up" if info.get("is_enabled") else "down",
-            "oper_status": "up" if info.get("is_up") else "down",
-            "mac_address": info.get("mac_address") or None,
-            "ip_addresses": _ips_for(name),
-        }
-        for name, info in napalm_interfaces.items()
-    ]
+    data["errors"].extend(errors)
+    data["serial"] = serial
+    data["os_version"] = os_version
+    data["interfaces"] = interfaces
     return data
 
 
 def _merge_interface(snmp_if, ssh_if):
-    """Combina os dados de uma mesma interface vindos de SNMP e de SSH/
-    NAPALM (método 'both') -- o driver NAPALM costuma trazer descrição,
-    MAC e status mais confiáveis (lido direto do fabricante, sem depender
-    de OID padrão), então tem prioridade quando o SSH trouxe algo; o que
-    o SSH não trouxe (ou se o SSH falhou nessa interface específica)
-    continua vindo do SNMP, que serve de rede de segurança."""
+    """Combina os dados de uma mesma interface vindos de SNMP e de SSH
+    (método 'both') -- o SSH (via TextFSM, ver _ssh_collect_textfsm)
+    costuma trazer descrição, MAC e status mais confiáveis (lido direto
+    do comando do fabricante, sem depender de OID padrão), então tem
+    prioridade quando o SSH trouxe algo; o que o SSH não trouxe (ou se
+    o SSH falhou nessa interface específica) continua vindo do SNMP,
+    que serve de rede de segurança."""
     base = dict(snmp_if or ssh_if or {})
     for key in ("descr", "admin_status", "oper_status", "mac_address"):
         ssh_val = (ssh_if or {}).get(key)
@@ -576,14 +661,14 @@ def _merge_interface(snmp_if, ssh_if):
 
 
 def collect_both(device, credentials, snmp_timeout=5, snmp_retries=1):
-    """Roda SSH (NAPALM) e SNMP na MESMA coleta e cruza os resultados por
+    """Roda SSH (Netmiko) e SNMP na MESMA coleta e cruza os resultados por
     interface -- pensado pra device onde nenhum dos dois métodos sozinho
-    é suficiente (ex: um fabricante cujo driver NAPALM não traz certos
+    é suficiente (ex: um fabricante cujo comando SSH não traz certos
     campos mas o SNMP traz, ou vice-versa). Cada protocolo roda de forma
-    independente e best-effort: se um falhar (ex: MikroTik não tem driver
-    NAPALM oficial), a coleta segue com o que o outro trouxe em vez de
-    falhar tudo -- os erros de ambos ficam registrados em 'errors' pro
-    operador ver o que não funcionou."""
+    independente e best-effort: se um falhar (ex: fabricante sem
+    device_type SSH reconhecido aqui), a coleta segue com o que o outro
+    trouxe em vez de falhar tudo -- os erros de ambos ficam registrados
+    em 'errors' pro operador ver o que não funcionou."""
     username = credentials.get("discovery_username")
     password = credentials.get("discovery_password")
     port = credentials.get("discovery_ssh_port")
@@ -675,7 +760,7 @@ def collect_device(device, method, credentials, snmp_timeout=5, snmp_retries=1):
 # Normalização de nome de interface -- necessário porque o Device Type
 # no NetBox costuma já vir com um Interface Template (ex: NE8000 com
 # 48 portas pré-cadastradas como "GigabitEthernet0/0/1"), mas o que
-# volta da descoberta (SSH via NAPALM, ou SNMP via ifDescr/ifName) pode
+# volta da descoberta (SSH via Netmiko/TextFSM, ou SNMP via ifDescr/ifName) pode
 # usar abreviação diferente (ex: "Gi0/0/1" ou "GE0/0/1"). Comparação de
 # string exata faria o apply() achar que são portas diferentes e criar
 # uma interface NOVA duplicada (tipo "other") em vez de reaproveitar a
@@ -733,7 +818,7 @@ def normalize_ifname(name):
 # apply -- grava o resultado de uma coleta (já revisado) no NetBox
 # --------------------------------------------------------------------
 # Tipo de interface (campo "type" do NetBox) -- a descoberta (SNMP ou
-# SSH/NAPALM) não traz esse dado de forma confiável, então tentamos
+# SSH via Netmiko) não traz esse dado de forma confiável, então tentamos
 # adivinhar a partir do NOME da interface (mesma ideia de
 # normalize_ifname acima) e deixamos o operador confirmar/trocar na
 # tela de revisão antes de gravar. Sem isso, toda interface nova
@@ -1061,8 +1146,8 @@ def apply_device_result(nb, device, data, interface_filter=None):
         if parent_name:
             pending_parents.append((name, parent_name))
 
-        # IP(s) descoberto(s) na porta (SNMP ipAddrTable e/ou NAPALM
-        # get_interfaces_ip, ver collect_snmp()/collect_ssh()) -- grava
+        # IP(s) descoberto(s) na porta (SNMP ipAddrTable e/ou SSH via
+        # TextFSM, ver collect_snmp()/collect_ssh()) -- grava
         # no IPAM e associa a essa interface. Best-effort por IP: um
         # endereço mal formado ou um conflito específico não pode
         # derrubar a aplicação do resto do device.

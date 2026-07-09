@@ -72,7 +72,7 @@
             <th>Região <i class="ti ti-info-circle text-secondary" title="Vem do Site escolhido -- não é editável direto aqui"></i></th>
             <th>Fabricante <i class="ti ti-info-circle text-secondary" title="Fabricante e modelo do device (Device Type)"></i></th>
             <th>IP de gerência <i class="ti ti-info-circle text-secondary" title="IP usado pra conectar e coletar dados do device"></i></th>
-            <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH (NAPALM), SNMP, ou os dois juntos (roda os dois e cruza o resultado por interface -- útil quando um método sozinho não traz tudo). O driver NAPALM pra SSH é resolvido automaticamente pelo Fabricante -- não precisa escolher Platform manualmente"></i></th>
+            <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH, SNMP, ou os dois juntos (roda os dois e cruza o resultado por interface -- útil quando um método sozinho não traz tudo). A forma de conectar via SSH é resolvida automaticamente pelo Fabricante -- não precisa escolher Platform manualmente"></i></th>
             <th>Usuário (SSH) <i class="ti ti-info-circle text-secondary" title="Usuário de login SSH. Em MikroTik configurado como SNMP, é opcional -- só usado pra confirmar o vínculo VLAN/porta física e o comentário real da interface"></i></th>
             <th>Senha (SSH) <i class="ti ti-info-circle text-secondary" title="Senha de login SSH -- nunca é exibida, só substituída. Em MikroTik configurado como SNMP, é opcional"></i></th>
             <th>Porta SSH <i class="ti ti-info-circle text-secondary" title="Padrão 22 se deixar em branco"></i></th>
@@ -216,12 +216,17 @@
   // fora com o valor mudado); Esc cancela sem salvar.
   // ------------------------------------------------------------------
 
+  // device_type do Netmiko (não mais driver NAPALM) -- só informativo
+  // aqui no client-side pra decidir o MÉTODO sugerido (SSH/SNMP); quem
+  // resolve o device_type de verdade pra conectar é o servidor (ver
+  // discovery_core.resolve_ssh_device_type()), então não precisamos
+  // repetir o slug aqui.
   var MANUFACTURER_RULES = [
-    { match: /cisco/i, method: 'ssh', platformSlug: 'ios' },
-    { match: /juniper/i, method: 'ssh', platformSlug: 'junos' },
-    { match: /arista/i, method: 'ssh', platformSlug: 'eos' },
-    { match: /palo\s*alto/i, method: 'ssh', platformSlug: 'panos' },
-    { match: /huawei/i, method: 'ssh', platformSlug: 'huawei_vrp', oltCheck: true },
+    { match: /cisco/i, method: 'ssh' },
+    { match: /juniper/i, method: 'ssh' },
+    { match: /arista/i, method: 'ssh' },
+    { match: /palo\s*alto/i, method: 'ssh' },
+    { match: /huawei/i, method: 'ssh', oltCheck: true },
     { match: /mikrotik/i, method: 'snmp' },
     { match: /datacom/i, method: 'snmp' },
     { match: /zte/i, method: 'snmp' },
@@ -237,9 +242,9 @@
       var rule = MANUFACTURER_RULES[i];
       if (rule.match.test(manufacturer || '')) {
         if (rule.oltCheck && OLT_PATTERN.test(deviceTypeModel || '')) {
-          return { method: 'snmp', platformSlug: null };
+          return { method: 'snmp' };
         }
-        return { method: rule.method, platformSlug: rule.platformSlug || null };
+        return { method: rule.method };
       }
     }
     return null;
@@ -428,8 +433,8 @@
       editorEl.style.top = (rect.bottom + 4) + 'px';
       editorEl.style.left = rect.left + 'px';
 
-      // Fabricante sem driver SSH (NAPALM) reconhecido aqui (ex:
-      // MikroTik, a maioria das OLTs) -- ver platform_resolved em
+      // Fabricante sem device_type SSH reconhecido aqui (ex: MikroTik, a
+      // maioria das OLTs) -- ver platform_resolved em
       // app.py:_build_row(). Method="both" NUNCA fica pronto nesse caso
       // (mesmo com usuário/senha/community preenchidos), então nem deixa
       // marcar a opção SSH -- era isso que travava o status em
@@ -442,7 +447,7 @@
           sshOpt.disabled = true;
           if (label) {
             label.classList.add('method-opt-label-disabled');
-            label.title = 'Esse fabricante não tem driver SSH (NAPALM) reconhecido aqui -- use só SNMP.';
+            label.title = 'Esse fabricante não tem um jeito de conectar via SSH reconhecido aqui -- use só SNMP.';
           }
         } else {
           sshOpt.disabled = false;
@@ -456,9 +461,9 @@
       var first = editorEl.querySelector('.method-opt:not(:disabled)') || editorEl.querySelector('.method-opt');
       if (first) first.focus();
       // Sugestão automática só se ainda não tem nada configurado. O
-      // driver NAPALM (Platform) não é mais escolhido aqui -- é resolvido
-      // sozinho a partir do Fabricante do lado do servidor (ver
-      // discovery_core.resolve_platform_slug()).
+      // jeito de conectar via SSH (Platform, opcional) não é mais
+      // escolhido aqui -- é resolvido sozinho a partir do Fabricante do
+      // lado do servidor (ver discovery_core.resolve_ssh_device_type()).
       if (!hiddenInput.value) {
         var suggestion = suggestFor(tr.dataset.manufacturer, tr.dataset.deviceTypeModel);
         if (suggestion) {
@@ -530,13 +535,4 @@
       });
     }
     tr.querySelectorAll('td').forEach(function (td) {
-      if (td.classList.contains('method-cell')) { wireMethodCell(td, tr); return; }
-      wireCell(td, tr);
-    });
-  }
-
-  rows.forEach(wireRow);
-})();
-</script>
-{% endif %}
-{% endblock %}
+      if (td.classList.contai

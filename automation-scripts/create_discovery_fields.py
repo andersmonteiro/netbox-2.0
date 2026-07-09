@@ -42,7 +42,7 @@ FIELDS = {
         "label": "Descoberta: método",
         "description": "Como o discovery_netbox.py deve descobrir este device (deixe em branco para não incluir na descoberta).",
         "choice_set": {
-            "extra_choices": [["ssh", "SSH (NAPALM)"], ["snmp", "SNMP"], ["both", "SSH + SNMP"]],
+            "extra_choices": [["ssh", "SSH"], ["snmp", "SNMP"], ["both", "SSH + SNMP"]],
         },
         "weight": 100,
     },
