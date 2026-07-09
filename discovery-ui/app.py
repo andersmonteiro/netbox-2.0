@@ -739,13 +739,29 @@ def review():
                     or (core.guess_parent_name(iface.get("name"), all_names) if iface["is_vlan"] else None)
                 )
 
+                # LAG detectada de verdade lendo o device (Eth-Trunk no
+                # Huawei via _huawei_collect_eth_trunk, "Parent-LAG" no
+                # Datacom via _collect_datacom -- ambos gravam
+                # iface["lag_parent"] em discovery_core.py) tem
+                # prioridade; se essa rodada de descoberta não trouxe
+                # essa informação (ex: comando falhou nesse device dessa
+                # vez), cai pro que já estiver salvo no NetBox, pra não
+                # perder um vínculo já confirmado antes. Campo livre (não
+                # dropdown) porque a LAG pode não existir ainda como
+                # Interface no NetBox -- apply_device_result cria se
+                # precisar (ver terceira passada).
+                existing_if = existing_by_norm.get(core.normalize_ifname(iface.get("name")))
+                existing_lag = getattr(existing_if, "lag", None) if existing_if else None
+                iface["existing_lag"] = existing_lag.name if existing_lag else ""
+                iface["guessed_lag"] = iface.get("lag_parent") or iface["existing_lag"]
+
                 # Descrição REAL já salva no NetBox pra essa interface
                 # (quando ela já existe) -- a descrição que vem da própria
                 # descoberta (SNMP ifDescr, por exemplo) costuma ser só o
                 # nome cru da porta, não o comentário que o operador já
                 # colocou no NetBox, então priorizamos o que já está salvo
                 # no campo de edição (o operador ainda pode trocar).
-                existing_if = existing_by_norm.get(core.normalize_ifname(iface.get("name")))
+                # (existing_if já resolvido acima, junto com existing_lag)
                 iface["existing_description"] = existing_if.description if existing_if else ""
 
             # Agrupa por tipo (físicas por velocidade crescente, depois
@@ -822,11 +838,13 @@ def review_apply(filename):
         desc = request.form.get(f"desc_{idx}", "")
         iface_type = request.form.get(f"type_{idx}", "").strip()
         parent_name = request.form.get(f"parent_{idx}", "").strip()
+        lag_name = request.form.get(f"lag_{idx}", "").strip()
         interface_filter[name] = {
             "include": include,
             "description": desc,
             "type": iface_type or None,
             "parent_name": parent_name or None,
+            "lag_name": lag_name or None,
         }
         idx += 1
 

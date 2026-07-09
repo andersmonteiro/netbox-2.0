@@ -482,6 +482,12 @@ _MANUFACTURER_SSH_RULES = [
     # (confirmado contra device real do cliente: 'display interface'/
     # 'display version' voltavam sem dado estruturado nenhum).
     (re.compile(r"huawei", re.I), "huawei_vrp"),
+    # "datacom_dmos" NÃO é um device_type de verdade do Netmiko (não
+    # existe driver Datacom/DmOS lá, nem template no ntc-templates) --
+    # é só um marcador interno que faz collect_ssh() desviar pra
+    # _collect_datacom() (parser próprio, sem TextFSM) em vez do
+    # caminho genérico via _SSH_COMMANDS/_ssh_collect_textfsm.
+    (re.compile(r"datacom", re.I), "datacom_dmos"),
 ]
 _OLT_PATTERN = re.compile(r"\bolt\b|ma5\d{3}", re.I)
 
@@ -617,6 +623,208 @@ def _ssh_collect_textfsm(conn, iface_cmd, version_cmd):
     return interfaces, serial, os_version, errors
 
 
+def _huawei_collect_eth_trunk(conn):
+    """Roda 'display eth-trunk' (sem ID -- lista TODOS os trunks de uma
+    vez) e devolve {nome_da_porta_membro: nome_do_trunk} (ex:
+    {'GigabitEthernet0/0/1': 'Eth-Trunk1'}) -- usado pra popular
+    lag_parent nas interfaces físicas já coletadas. Best-effort:
+    qualquer falha (comando não existe nessa versão, sem trunk
+    configurado, TextFSM sem template) só devolve dict vazio, nunca
+    derruba a coleta principal de interfaces (que já está pronta quando
+    isso é chamado).
+
+    AINDA NÃO validado contra saída real de 'display eth-trunk' de um
+    device do cliente -- o template usado (ntc-templates
+    huawei_vrp_display_eth-trunk, com o mesmo patch de tolerância a
+    linha desconhecida do huawei_vrp_display_interface/version, ver
+    textfsm_overrides/) segue o formato documentado do comando, mas
+    ainda precisa ser confirmado contra o device de verdade."""
+    try:
+        parsed = conn.send_command("display eth-trunk", use_textfsm=True)
+    except Exception:
+        return {}
+    if not isinstance(parsed, list):
+        return {}
+    members = {}
+    for row in parsed:
+        trunk = _pick(row, "ETH_TRUNK")
+        member = _pick(row, "INTERFACE")
+        if trunk and member:
+            members[member] = trunk
+    return members
+
+
+# --------------------------------------------------------------------
+# Datacom (DmOS) -- sem device_type nativo no Netmiko e sem template no
+# ntc-templates (confirmado: nenhum dos dois tem suporte a Datacom/DmOS
+# hoje), então a coleta aqui é por conta própria: conecta com o driver
+# genérico do Netmiko (detecção de prompt sem nenhum comando de
+# desabilitar paginação específico -- ainda sem confirmação se é
+# necessário em saída muito longa) e parseia a saída de dois comandos
+# com regex em vez de TextFSM. Parsers validados contra saída real de
+# um switch DmOS do cliente (prompt "SW.CORE-DTC#").
+# --------------------------------------------------------------------
+_DATACOM_SECTION_RE = re.compile(r"^(.+?)\s+Interfaces:\s*$")
+_DATACOM_ROW_RE = re.compile(r"^(\d+/\d+/\d+)\s+(.*)$")
+
+
+def _datacom_iface_prefix(section_title):
+    """'Ten Gigabit Ethernet' -> 'ten-gigabit-ethernet' -- mesmo formato
+    usado pelo próprio equipamento em 'show interface utilization'
+    (confirmado contra device real: ten-gigabit-ethernet-1/1/1,
+    forty-gigabit-ethernet-1/1/1)."""
+    return re.sub(r"\s+", "-", section_title.strip().lower())
+
+
+def _datacom_parse_description(output):
+    """Parseia 'show interface description' -> {nome_completo: descrição}.
+    A tabela tem seções por tipo de porta (Ten/Forty Gigabit Ethernet),
+    cada uma com seu próprio cabeçalho "<Tipo> Interfaces:" que define o
+    prefixo do nome -- ignora qualquer linha que não seja um desses dois
+    formatos (cabeçalho de coluna, separador tracejado, prompt) em vez
+    de tentar reconhecer cada um deles."""
+    result = {}
+    prefix = None
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        m = _DATACOM_SECTION_RE.match(line)
+        if m:
+            prefix = _datacom_iface_prefix(m.group(1))
+            continue
+        m = _DATACOM_ROW_RE.match(line)
+        if m and prefix:
+            port_id, descr = m.group(1), m.group(2).strip()
+            result[f"{prefix}-{port_id}"] = descr
+    return result
+
+
+def _datacom_parse_link(output):
+    """Parseia 'show interface link' -> lista de dicts com nome completo,
+    status admin/oper e LAG pai (coluna 'Parent LAG', ex: 'lag-1') --
+    mesma lógica de seção por prefixo do parser acima."""
+    interfaces = []
+    prefix = None
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        m = _DATACOM_SECTION_RE.match(line)
+        if m:
+            prefix = _datacom_iface_prefix(m.group(1))
+            continue
+        if not prefix or not re.match(r"^\d+/\d+/\d+\s", line):
+            continue
+        # Colunas de largura fixa separadas por 2+ espaços: ID, Link,
+        # Shutdown, Speed, Duplex, Disabled by, Blocked by, Parent LAG,
+        # [Description]. A descrição aqui vem TRUNCADA em nome muito
+        # longo (ex: "PTP-OLT-POP-CIDAD...") -- 'show interface
+        # description' é a fonte confiável pra descrição completa, essa
+        # aqui só serve de apoio se a outra não trouxer nada pra essa
+        # porta (ver _collect_datacom).
+        cols = re.split(r"\s{2,}", line)
+        if len(cols) < 8:
+            continue
+        port_id, link, shutdown, speed, duplex, disabled_by, blocked_by, lag = cols[:8]
+        descr_fallback = cols[8] if len(cols) > 8 else ""
+        interfaces.append({
+            "name": f"{prefix}-{port_id}",
+            "oper_status": "up" if link.strip().lower() == "up" else "down",
+            "admin_status": "down" if shutdown.strip().lower() == "true" else "up",
+            "lag_parent": lag if lag and lag != "-" else None,
+            "descr_fallback": descr_fallback,
+        })
+    return interfaces
+
+
+def _collect_datacom(device, username, password, port=None):
+    """Coleta Datacom DmOS via SSH -- 'show interface description' (nome
+    completo + descrição sem truncar) e 'show interface link' (status +
+    LAG pai), sem TextFSM (não existe template pra esse fabricante)."""
+    if not device.primary_ip4:
+        return {"method": "ssh", "errors": ["sem IP de gerência (primary_ip4)"]}
+
+    host = str(device.primary_ip4).split("/")[0]
+    data = {"method": "ssh", "host": host, "errors": []}
+
+    from netmiko import ConnectHandler, NetmikoAuthenticationException, NetmikoTimeoutException
+
+    try:
+        conn = ConnectHandler(
+            device_type="generic_ssh",
+            host=host,
+            username=username,
+            password=password,
+            port=int(port) if port else 22,
+            timeout=15,
+        )
+    except NetmikoAuthenticationException:
+        data["errors"].append("falha ao conectar: usuário/senha rejeitados pelo device")
+        return data
+    except NetmikoTimeoutException:
+        data["errors"].append("falha ao conectar: timeout (IP/porta inacessível ou SSH não habilitado)")
+        return data
+    except Exception as exc:
+        data["errors"].append(f"falha ao conectar: {exc}")
+        return data
+
+    descr_by_name = {}
+    link_interfaces = []
+    try:
+        try:
+            descr_out = conn.send_command("show interface description")
+            descr_by_name = _datacom_parse_description(descr_out)
+        except Exception as exc:
+            data["errors"].append(f"falha ao rodar 'show interface description': {exc}")
+        try:
+            link_out = conn.send_command("show interface link")
+            link_interfaces = _datacom_parse_link(link_out)
+        except Exception as exc:
+            data["errors"].append(f"falha ao rodar 'show interface link': {exc}")
+    finally:
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+
+    interfaces = []
+    seen = set()
+    for iface in link_interfaces:
+        name = iface["name"]
+        seen.add(name)
+        interfaces.append({
+            "name": name,
+            "descr": descr_by_name.get(name) or iface.get("descr_fallback") or "",
+            "admin_status": iface["admin_status"],
+            "oper_status": iface["oper_status"],
+            "mac_address": None,
+            "ip_addresses": [],
+            "lag_parent": iface.get("lag_parent"),
+        })
+    # Porta que apareceu em 'description' mas não em 'link' (não deveria
+    # acontecer -- os dois comandos listam as mesmas portas -- mas não
+    # custa não perder o dado se acontecer).
+    for name, descr in descr_by_name.items():
+        if name not in seen:
+            interfaces.append({
+                "name": name, "descr": descr, "admin_status": "unknown",
+                "oper_status": "unknown", "mac_address": None, "ip_addresses": [],
+                "lag_parent": None,
+            })
+
+    if not interfaces and not data["errors"]:
+        data["errors"].append(
+            "nenhuma interface reconhecida na saída dos comandos -- confira "
+            "se o formato do DmOS bate com o esperado"
+        )
+
+    data["serial"] = None
+    data["os_version"] = None
+    data["interfaces"] = interfaces
+    return data
+
+
 def collect_ssh(device, username, password, port=None):
     device_type = device.platform.slug if device.platform else None
     if not device_type:
@@ -628,13 +836,16 @@ def collect_ssh(device, username, password, port=None):
             "errors": [
                 "não consegui adivinhar como conectar via SSH pelo Fabricante -- "
                 "confirme se o Device Type tem um Fabricante reconhecido "
-                "(Cisco/Juniper/Arista/Palo Alto/Huawei) ou defina a "
+                "(Cisco/Juniper/Arista/Palo Alto/Huawei/Datacom) ou defina a "
                 "Platform manualmente no device (NetBox > Devices > editar, "
                 "com o Slug igual ao device_type do Netmiko, ex: 'cisco_ios')"
             ],
         }
     if not device.primary_ip4:
         return {"method": "ssh", "errors": ["sem IP de gerência (primary_ip4)"]}
+
+    if device_type == "datacom_dmos":
+        return _collect_datacom(device, username, password, port=port)
 
     commands = _SSH_COMMANDS.get(device_type)
     if not commands:
@@ -671,6 +882,17 @@ def collect_ssh(device, username, password, port=None):
         interfaces, serial, os_version, errors = _ssh_collect_textfsm(
             conn, commands["interfaces"], commands["version"]
         )
+        # Vínculo de Eth-Trunk (LAG) -- só pra Huawei, best-effort, roda
+        # na MESMA sessão SSH antes de desconectar (ver
+        # _huawei_collect_eth_trunk). Falha aqui nunca derruba a coleta
+        # de interfaces, que já está pronta nesse ponto.
+        if device_type == "huawei_vrp":
+            trunk_members = _huawei_collect_eth_trunk(conn)
+            if trunk_members:
+                for iface in interfaces:
+                    trunk = trunk_members.get(iface["name"])
+                    if trunk:
+                        iface["lag_parent"] = trunk
     finally:
         try:
             conn.disconnect()
@@ -1108,13 +1330,16 @@ def apply_device_result(nb, device, data, interface_filter=None):
     pelo CLI) num Device já carregado do pynetbox.
 
     interface_filter: dict opcional {nome_da_interface: {"include": bool,
-    "description": str, "type": str|None, "parent_name": str|None}} --
-    usado pela interface web pra permitir marcar quais interfaces
-    entram, editar a descrição, confirmar o tipo (ver
-    guess_interface_type) e -- pra interfaces de VLAN -- vincular à
-    porta física correspondente (campo "parent" do NetBox) antes de
-    aplicar. Se None, aplica todas as interfaces descobertas como
-    vieram, sem tipo nem vínculo (comportamento do CLI).
+    "description": str, "type": str|None, "parent_name": str|None,
+    "lag_name": str|None}} -- usado pela interface web pra permitir
+    marcar quais interfaces entram, editar a descrição, confirmar o
+    tipo (ver guess_interface_type), vincular à porta física
+    correspondente pra interfaces de VLAN (campo "parent" do NetBox) e
+    vincular a uma LAG (campo "lag" do NetBox, ex: 'lag-1' no Datacom,
+    'Eth-Trunk1' no Huawei -- cria a interface tipo LAG automaticamente
+    se ainda não existir, ver terceira passada abaixo). Se None, aplica
+    todas as interfaces descobertas como vieram, sem tipo nem vínculo
+    nenhum (comportamento do CLI).
 
     Retorna a lista de strings descrevendo o que mudou (changes).
     """
@@ -1137,6 +1362,7 @@ def apply_device_result(nb, device, data, interface_filter=None):
     created, updated, matched_norm, ip_written, prefixes_created = 0, 0, 0, 0, 0
     processed_by_name = {}  # nome descoberto -> objeto pynetbox da interface (nova ou já existente)
     pending_parents = []  # [(nome_da_vlan, nome_da_interface_pai)]
+    pending_lags = []  # [(nome_da_interface_membro, nome_da_lag)]
     seen_prefixes = set()  # evita checar/criar o mesmo prefixo mais de uma vez neste apply
 
     for iface in data.get("interfaces", []):
@@ -1146,6 +1372,7 @@ def apply_device_result(nb, device, data, interface_filter=None):
 
         iface_type = None
         parent_name = None
+        lag_name = None
         if interface_filter is not None:
             entry = interface_filter.get(name)
             if not entry or not entry.get("include", True):
@@ -1153,6 +1380,7 @@ def apply_device_result(nb, device, data, interface_filter=None):
             description = entry.get("description", iface.get("descr") or "")
             iface_type = entry.get("type") or None
             parent_name = entry.get("parent_name") or None
+            lag_name = entry.get("lag_name") or None
             # O NetBox só aceita "parent" em interface type=virtual -- se
             # veio vínculo de VLAN da revisão, força o tipo aqui (a API
             # rejeita com 400 "Only virtual interfaces may be assigned to
@@ -1194,6 +1422,8 @@ def apply_device_result(nb, device, data, interface_filter=None):
         processed_by_name[name] = nb_if
         if parent_name:
             pending_parents.append((name, parent_name))
+        if lag_name:
+            pending_lags.append((name, lag_name))
 
         # IP(s) descoberto(s) na porta (SNMP ipAddrTable e/ou SSH via
         # TextFSM, ver collect_snmp()/collect_ssh()) -- grava
@@ -1219,6 +1449,50 @@ def apply_device_result(nb, device, data, interface_filter=None):
         if vlan_if and parent_if and vlan_if.id != parent_if.id:
             vlan_if.update({"parent": parent_if.id})
             linked += 1
+
+    # Terceira passada: vincula interfaces físicas membras de uma LAG
+    # (ex: ten-gigabit-ethernet-1/1/1 -> lag-1 no Datacom, GigabitEthernet
+    # -> Eth-Trunk1 no Huawei) -- cria a interface tipo LAG no device se
+    # ainda não existir (find-or-create, cacheado por nome normalizado pra
+    # não duplicar quando várias membras apontam pra mesma LAG), depois
+    # seta o campo "lag" (FK pra outra Interface do mesmo device) em cada
+    # membro. Roda depois da 2ª passada pra não competir com o vínculo de
+    # VLAN por engano (LAG e VLAN-parent são campos diferentes do NetBox).
+    lag_created = 0
+    lag_linked = 0
+    lag_cache = {}  # nome normalizado da LAG -> objeto pynetbox da interface LAG
+    for member_name, lag_name in pending_lags:
+        member_if = processed_by_name.get(member_name)
+        if not member_if:
+            continue
+
+        norm_lag = normalize_ifname(lag_name)
+        lag_if = lag_cache.get(norm_lag)
+        if not lag_if:
+            lag_if = processed_by_name.get(lag_name) or existing_by_norm.get(norm_lag)
+            if not lag_if:
+                lag_if = nb.dcim.interfaces.create(
+                    {
+                        "device": device.id,
+                        "name": lag_name,
+                        "type": "lag",
+                        "enabled": True,
+                    }
+                )
+                lag_created += 1
+            lag_cache[norm_lag] = lag_if
+            processed_by_name.setdefault(lag_name, lag_if)
+
+        if lag_if.id == member_if.id:
+            continue  # não deveria acontecer, mas evita uma interface virar LAG de si mesma
+
+        try:
+            current_lag_id = member_if.lag.id if member_if.lag else None
+        except AttributeError:
+            current_lag_id = None
+        if current_lag_id != lag_if.id:
+            member_if.update({"lag": lag_if.id})
+            lag_linked += 1
 
     if created:
         changes.append(f"{created} interface(s) criada(s)")

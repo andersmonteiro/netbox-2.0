@@ -56,6 +56,7 @@
               <th class="col-iface">Interface</th>
               <th class="col-type">Tipo <i class="ti ti-info-circle text-secondary" title="Sugerido automaticamente pelo nome -- confira e troque se precisar"></i></th>
               <th class="col-parent">Interface física (VLAN) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN -- escolha a porta física onde essa VLAN está"></i></th>
+              <th class="col-lag">LAG <i class="ti ti-info-circle text-secondary" title="Preenchido automaticamente quando detectado no device (Eth-Trunk no Huawei, Parent-LAG no Datacom). Se a interface LAG ainda não existir no NetBox, ela é criada ao aprovar. Deixe em branco se essa porta não faz parte de nenhuma LAG."></i></th>
               <th class="col-status">Status</th>
               <th class="col-ip">IP (descoberto) <i class="ti ti-info-circle text-secondary" title="IP(s) configurado(s) na porta, lido agora via SNMP e/ou SSH -- ao aprovar, é isso que vai ser gravado no NetBox"></i></th>
               <th class="col-desc">Descrição <i class="ti ti-info-circle text-secondary" title="Já vem preenchido com o que estiver salvo no NetBox pra essa interface -- edite se precisar"></i></th>
@@ -90,6 +91,7 @@
                 <span class="text-secondary">—</span>
                 {% endif %}
               </td>
+              <td><input type="text" name="lag_{{ loop.index0 }}" class="form-control form-control-sm" value="{{ iface.guessed_lag or '' }}" placeholder="ex: lag-1"></td>
               <td>
                 <span class="badge text-uppercase {{ 'bg-success-lt' if iface.oper_status == 'up' else 'bg-red-lt' }}">{{ iface.oper_status }}</span>
               </td>
@@ -131,14 +133,15 @@
      mesma em todo card), então as colunas alinham entre os devices --
      e como o texto ainda quebra linha dentro da célula, nada é cortado,
      só a linha fica mais alta quando precisa. */
-  .table-review { table-layout: fixed; width: 100%; min-width: 1000px; }
+  .table-review { table-layout: fixed; width: 100%; min-width: 1100px; }
   .table-review .col-check { width: 3%; }
-  .table-review .col-iface { width: 14%; }
-  .table-review .col-type { width: 13%; }
-  .table-review .col-parent { width: 12%; }
+  .table-review .col-iface { width: 13%; }
+  .table-review .col-type { width: 11%; }
+  .table-review .col-parent { width: 11%; }
+  .table-review .col-lag { width: 10%; }
   .table-review .col-status { width: 6%; }
-  .table-review .col-ip { width: 22%; }
-  .table-review .col-desc { width: 30%; }
+  .table-review .col-ip { width: 20%; }
+  .table-review .col-desc { width: 26%; }
 </style>
 
 <script>
