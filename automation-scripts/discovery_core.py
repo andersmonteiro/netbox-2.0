@@ -847,6 +847,48 @@ def _sync_interface_ip(nb, nb_if, ip_str, device_id):
     return False
 
 
+def _ensure_prefix(nb, device, ip_str, seen_prefixes):
+    """Garante que o PREFIXO (a rede, ex: '10.0.0.0/24') de 'ip_str'
+    esteja cadastrado em IPAM > Prefixes -- o NetBox NÃO cria isso
+    sozinho quando um IP Address é criado dentro dele; sem o prefixo, o
+    IPAM fica incompleto (só o host solto, sem hierarquia/visão de
+    utilização da rede). Ignora endereço /32 (ou /128 em IPv6): não é
+    uma sub-rede de verdade, só um host isolado (ex: IP sem máscara
+    descoberta, ver collect_snmp/collect_ssh), então criar um "prefixo"
+    do tamanho de um host não ajuda em nada.
+
+    'seen_prefixes' é um set compartilhado entre chamadas dentro do
+    mesmo apply_device_result() -- evita bater na API de novo pro
+    mesmo prefixo quando várias interfaces do device caem na mesma
+    sub-rede (comum: várias VLANs/portas na mesma rede de gerência).
+
+    Retorna True se criou um prefixo novo."""
+    try:
+        iface_ip = ipaddress.ip_interface((ip_str or "").strip())
+    except ValueError:
+        return False
+    network = iface_ip.network
+    if network.prefixlen == network.max_prefixlen:
+        return False  # /32 ou /128 -- host isolado, não é sub-rede
+
+    prefix_str = str(network)
+    if prefix_str in seen_prefixes:
+        return False
+    seen_prefixes.add(prefix_str)
+
+    if nb.ipam.prefixes.get(prefix=prefix_str):
+        return False
+
+    payload = {"prefix": prefix_str, "status": "active"}
+    try:
+        if device.site:
+            payload["site"] = device.site.id
+    except Exception:
+        pass
+    nb.ipam.prefixes.create(payload)
+    return True
+
+
 def apply_device_result(nb, device, data, interface_filter=None):
     """Aplica um resultado de coleta (dict, mesmo formato salvo em JSON
     pelo CLI) num Device já carregado do pynetbox.
@@ -878,9 +920,10 @@ def apply_device_result(nb, device, data, interface_filter=None):
 
     existing_if = list(nb.dcim.interfaces.filter(device_id=device.id))
     existing_by_norm = {normalize_ifname(i.name): i for i in existing_if}
-    created, updated, matched_norm, ip_written = 0, 0, 0, 0
+    created, updated, matched_norm, ip_written, prefixes_created = 0, 0, 0, 0, 0
     processed_by_name = {}  # nome descoberto -> objeto pynetbox da interface (nova ou já existente)
     pending_parents = []  # [(nome_da_vlan, nome_da_interface_pai)]
+    seen_prefixes = set()  # evita checar/criar o mesmo prefixo mais de uma vez neste apply
 
     for iface in data.get("interfaces", []):
         name = iface.get("name")
@@ -947,6 +990,8 @@ def apply_device_result(nb, device, data, interface_filter=None):
             try:
                 if _sync_interface_ip(nb, nb_if, ip_str, device.id):
                     ip_written += 1
+                if _ensure_prefix(nb, device, ip_str, seen_prefixes):
+                    prefixes_created += 1
             except Exception:
                 pass
 
@@ -971,6 +1016,8 @@ def apply_device_result(nb, device, data, interface_filter=None):
         changes.append(f"{linked} VLAN(s) vinculada(s) à interface física")
     if ip_written:
         changes.append(f"{ip_written} IP(s) gravado(s)/associado(s) no IPAM")
+    if prefixes_created:
+        changes.append(f"{prefixes_created} prefixo(s) criado(s) no IPAM")
 
     return changes
 
