@@ -574,4 +574,8 @@ recriar o repositório.
 
 ## Fontes usadas na pesquisa deste projeto
 
-- [netbox-community/net
+- [netbox-community/netbox-docker](https://github.com/netbox-community/netbox-docker)
+- [Using NetBox Plugins (wiki)](https://github.com/netbox-community/netbox-docker/wiki/Using-Netbox-Plugins)
+- [netbox-community/netbox-topology-views](https://github.com/netbox-community/netbox-topology-views) (tabela de compatibilidade no README)
+- [netbox-community/netbox-qrcode](https://github.com/netbox-community/netbox-qrcode) (COMPATIBILITY.md)
+- [netboxcommunity/netbox tags (Docker Hub)](https://hub.docker.com/r/netboxcommunity/netbox/tags) — usado para confirmar qual patch a tag `v4.5` aponta hoje

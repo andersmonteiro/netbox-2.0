@@ -535,4 +535,13 @@
       });
     }
     tr.querySelectorAll('td').forEach(function (td) {
-      if (td.classList.contai
+      if (td.classList.contains('method-cell')) { wireMethodCell(td, tr); return; }
+      wireCell(td, tr);
+    });
+  }
+
+  rows.forEach(wireRow);
+})();
+</script>
+{% endif %}
+{% endblock %}
