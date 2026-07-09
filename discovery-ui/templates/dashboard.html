@@ -406,16 +406,25 @@
     if (!viewEl || !editorEl || !hiddenInput) return;
 
     function openEditor() {
-      viewEl.style.display = 'none';
-      editorEl.style.display = '';
-
       // position:fixed (ver comentário no CSS .method-editor) --
       // calculado aqui a partir da posição na TELA do chip clicado, não
       // do pai (que é o padrão do position:absolute). Sem isso o
       // dropdown ficava cortado pela .table-responsive quando abria
       // perto do fim da tabela (overflow-x:auto vira overflow-y:auto
       // também, então corta/esconde o que "vaza" verticalmente).
+      //
+      // TEM que ser calculado ANTES de esconder viewEl: um elemento
+      // com display:none não tem "caixa" nenhuma, então
+      // getBoundingClientRect() nele sempre devolve tudo zerado -- é
+      // isso que fazia o dropdown abrir cravado no canto superior
+      // esquerdo da PÁGINA (top:4px, left:0) em vez de do lado do chip
+      // clicado, e cliques dentro dele acabavam caindo em cima de
+      // qualquer elemento real que estivesse ali (navbar, outra linha),
+      // o que parecia um "refresh" da tela a cada clique.
       var rect = viewEl.getBoundingClientRect();
+
+      viewEl.style.display = 'none';
+      editorEl.style.display = '';
       editorEl.style.top = (rect.bottom + 4) + 'px';
       editorEl.style.left = rect.left + 'px';
 
