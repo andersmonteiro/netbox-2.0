@@ -563,9 +563,24 @@ def _pick(row, *keys):
     linha parseada por TextFSM) tentando várias chaves candidatas -- os
     nomes de campo variam de template pra template do ntc-templates (ex:
     MAC pode vir como MAC_ADDRESS, ADDRESS ou BIA dependendo do
-    fabricante), então não dá pra assumir um nome fixo."""
+    fabricante), então não dá pra assumir um nome fixo.
+
+    Tenta a chave exata primeiro, depois em minúsculo -- o Netmiko (via
+    netmiko.utilities.clitable_to_dict(), confirmado lendo o código
+    instalado: `temp_dict[cli_table.header[index].lower()] = element`)
+    baixa pra minúsculo o nome de TODO campo do TextFSM antes de devolver
+    o dict pro send_command(..., use_textfsm=True) -- os templates deste
+    projeto (e do ntc-templates em geral) declaram os campos em
+    MAIÚSCULO ("Value INTERFACE ...", "Value ETH_TRUNK ..."), então sem
+    esse fallback toda chamada _pick(row, "INTERFACE", ...) SEMPRE
+    retornava None nessa versão do Netmiko -- o que também zerava
+    silenciosamente a lista de interfaces inteira em
+    _ssh_collect_textfsm() (só não ficava óbvio em devices com método
+    'both', porque o SNMP preenchia por baixo)."""
     for key in keys:
         value = row.get(key)
+        if value is None:
+            value = row.get(key.lower())
         if isinstance(value, list):
             value = value[0] if value else None
         if value:
