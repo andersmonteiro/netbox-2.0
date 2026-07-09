@@ -91,7 +91,7 @@
                 <span class="text-secondary">—</span>
                 {% endif %}
               </td>
-              <td><input type="text" name="lag_{{ loop.index0 }}" class="form-control form-control-sm" value="{{ iface.guessed_lag or '' }}" placeholder="ex: lag-1"></td>
+              <td><input type="text" name="lag_{{ loop.index0 }}" class="form-control form-control-sm" value="{{ iface.guessed_lag or '' }}"></td>
               <td>
                 <span class="badge text-uppercase {{ 'bg-success-lt' if iface.oper_status == 'up' else 'bg-red-lt' }}">{{ iface.oper_status }}</span>
               </td>
