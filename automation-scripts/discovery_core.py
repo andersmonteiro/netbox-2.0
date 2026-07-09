@@ -1129,6 +1129,48 @@ def _extract_duplicate_cidr(exc):
     return match.group(1) if match else None
 
 
+def _find_ip_by_cidr(nb, cidr):
+    """Localiza um IPAddress já existente cujo HOST bate com 'cidr' (ex:
+    '45.6.176.1/28') -- usado depois de um 400 de endereço duplicado
+    (ver set_primary_ip), pra reaproveitar o registro em vez de travar.
+
+    Tenta os filtros da API do NetBox em ordem de confiabilidade: o
+    filtro 'address' (exato) deveria bastar sozinho, mas não confiamos
+    só nele -- em algum ambiente/versão ele pode não bater por string
+    exata (ex: normalização de zero à esquerda, ordem dos octetos em
+    IPv6 etc.), o que faria a gente devolver None e repassar o 400 cru
+    de novo mesmo com o registro existindo de verdade. Cai pro filtro
+    'parent' (a rede que contém o host -- filtro padrão e bem estável
+    do NetBox) e por fim uma busca textual (q=) antes de desistir.
+    Sempre confere o HOST exato (ignora o prefixo) no resultado antes de
+    aceitar, pra não pegar um vizinho por engano numa busca mais larga
+    (parent/q podem devolver vários hosts da mesma rede)."""
+    try:
+        host = str(ipaddress.ip_interface(cidr).ip)
+    except ValueError:
+        host = cidr.split("/")[0]
+
+    def _first_host_match(candidates):
+        for c in candidates:
+            if str(c.address).split("/")[0] == host:
+                return c
+        return None
+
+    found = _first_host_match(nb.ipam.ip_addresses.filter(address=cidr))
+    if found:
+        return found
+
+    try:
+        network = str(ipaddress.ip_interface(cidr).network)
+        found = _first_host_match(nb.ipam.ip_addresses.filter(parent=network))
+        if found:
+            return found
+    except ValueError:
+        pass
+
+    return _first_host_match(nb.ipam.ip_addresses.filter(q=host))
+
+
 def set_primary_ip(nb, device, ip_str):
     """Garante que 'device' tenha 'ip_str' (ex: '10.0.0.1' ou
     '10.0.0.1/32') como Primary IPv4. No modelo do NetBox, um IP só
@@ -1180,11 +1222,12 @@ def set_primary_ip(nb, device, ip_str):
         except pynetbox.RequestError as exc:
             # Endereço já existe com outro prefixo (ver docstring) --
             # extrai o CIDR real da mensagem de erro do NetBox e busca
-            # o registro existente pra reaproveitar.
+            # o registro existente pra reaproveitar (ver _find_ip_by_cidr,
+            # tenta vários filtros -- não confia só no 'address' exato).
             existing_cidr = _extract_duplicate_cidr(exc)
             if not existing_cidr:
                 raise
-            ip_obj = nb.ipam.ip_addresses.get(address=existing_cidr)
+            ip_obj = _find_ip_by_cidr(nb, existing_cidr)
             if not ip_obj:
                 raise
 
