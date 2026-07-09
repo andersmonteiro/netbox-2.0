@@ -4,7 +4,9 @@
 {% block content %}
 <div class="page-header d-print-none">
   <h2 class="page-title">Revisão de descobertas</h2>
+  {% if items %}
   <div class="text-secondary">Nada foi gravado no NetBox ainda. Desmarque as interfaces que não quer enviar, ajuste a descrição se precisar, e clique em Aprovar.</div>
+  {% endif %}
 </div>
 
 {% if not items %}
