@@ -401,20 +401,19 @@ def _build_row(d):
         "platform": _display_case(str(d.platform)) if d.platform else None,
         "platform_id": d.platform.id if d.platform else None,
         "method": method,
-        # Lista pra montar os "chips" (SSH / SNMP) no dashboard --
-        # method="both" vira os dois chips, "ssh"/"snmp" vira um só.
-        "method_list": (["ssh", "snmp"] if method == "both" else [method] if method else []),
         "has_cred": has_cred,
         "has_ssh_cred": has_ssh_cred,
-        # Usado pra colorir os chips SSH/SNMP no dashboard (estilo
-        # Zabbix: cinza = protocolo não selecionado, verde = selecionado
-        # e com credencial completa, vermelho = selecionado mas faltando
-        # credencial -- ver _device_row.html). platform_resolved entra no
-        # SSH porque sem um device_type Netmiko reconhecido, o SSH nunca
-        # funciona mesmo com usuário/senha certos (mesmo critério do
-        # not_ready_reason acima).
-        "ssh_configured": has_ssh_cred_pair and platform_resolved,
-        "snmp_configured": has_community,
+        # Resultado da checagem RÁPIDA e real de conectividade (ver
+        # test_ssh_connectivity()/test_snmp_connectivity() em
+        # discovery_core.py, disparada por app.py:_apply_discovery_form()
+        # sempre que a credencial daquele protocolo muda) -- é isso que
+        # colore os badges SSH/SNMP estilo Zabbix no dashboard, SEMPRE
+        # visíveis (ver _device_row.html): "ok" = verde, "error" =
+        # vermelho, "" (nunca testado / sem credencial) = cinza.
+        "ssh_status": cf.get("discovery_ssh_status") or "",
+        "ssh_status_detail": cf.get("discovery_ssh_status_detail") or "",
+        "snmp_status": cf.get("discovery_snmp_status") or "",
+        "snmp_status_detail": cf.get("discovery_snmp_status_detail") or "",
         # Platform (override opcional de device_type) só é obrigatório
         # quando o método envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
         "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or platform_resolved)),
@@ -590,7 +589,22 @@ def device_row(device_id):
 
 def _apply_discovery_form(nb, device, form):
     """Lê os campos comuns ao formulário de novo/editar device e grava
-    Nome, Platform, Primary IP e os custom fields de descoberta."""
+    Nome, Platform, Primary IP e os custom fields de descoberta.
+
+    Não existe mais escolha manual de "Método" (SSH/SNMP/os dois) -- o
+    operador só preenche as credenciais de qualquer protocolo que
+    quiser usar (usuário/senha/porta SSH e/ou community SNMP) e o
+    método é DERIVADO sozinho a partir do que está preenchido (ver
+    has_ssh/has_snmp abaixo). Isso troca o antigo clique-pra-escolher
+    (removido do dashboard.html/_device_row.html e do device_form.html)
+    por "estilo Zabbix": os campos de credencial estão sempre visíveis,
+    e assim que uma credencial fica completa a gente já testa de
+    verdade se dá pra conectar (ver test_ssh_connectivity()/
+    test_snmp_connectivity() em discovery_core.py) pra colorir o badge
+    daquele protocolo verde/vermelho no dashboard."""
+    cf_before = dict(device.custom_fields or {})
+    old_ip = str(device.primary_ip4).split("/")[0] if device.primary_ip4 else None
+
     new_name = form.get("name", "").strip()
     if new_name and new_name != device.name:
         device.update({"name": new_name})
@@ -608,7 +622,9 @@ def _apply_discovery_form(nb, device, form):
         device.update({"platform": int(platform_id)})
 
     primary_ip = form.get("primary_ip", "").strip()
+    ip_changed = False
     if primary_ip:
+        ip_changed = primary_ip != old_ip
         core.set_primary_ip(nb, device, primary_ip)
 
     # discovery_ssh_port é custom field tipo "integer" no NetBox -- manda
@@ -624,22 +640,80 @@ def _apply_discovery_form(nb, device, form):
         except ValueError:
             ssh_port = None
 
-    # "method" in form (não só truthy) porque o widget de chips do
-    # dashboard manda method="" de propósito quando o operador remove
-    # todos os protocolos (os dois "x") -- precisa chegar até aqui pra
-    # limpar discovery_method de verdade no NetBox, não só ignorar. Os
-    # outros formulários (cadastro/edição de device) simplesmente não
-    # mandam esse campo quando não se aplica, então o "in" não muda nada
-    # pra eles.
-    if "method" in form:
-        method = form.get("method") or None
+    has_cred_fields = any(
+        k in form for k in
+        ("discovery_username", "discovery_password", "discovery_snmp_community", "discovery_ssh_port")
+    )
+    if has_cred_fields:
+        new_username = (form.get("discovery_username") or "").strip() or None
+        new_password_raw = form.get("discovery_password") or None  # branco = manter a senha atual
+        new_community = (form.get("discovery_snmp_community") or "").strip() or None
+
+        old_username = cf_before.get("discovery_username")
+        old_has_password = bool(cf_before.get("discovery_password"))
+        old_community = cf_before.get("discovery_snmp_community")
+        old_ssh_port = cf_before.get("discovery_ssh_port")
+
+        final_username = new_username if new_username is not None else old_username
+        final_has_password = bool(new_password_raw) or old_has_password
+        final_community = new_community if new_community is not None else old_community
+        final_ssh_port = ssh_port if ssh_port is not None else old_ssh_port
+
+        has_ssh = bool(final_username and final_has_password)
+        has_snmp = bool(final_community)
+        method = "both" if (has_ssh and has_snmp) else ("ssh" if has_ssh else ("snmp" if has_snmp else None))
+
         core.set_discovery_fields(
             device, method,
-            discovery_username=form.get("discovery_username") or None,
-            discovery_password=form.get("discovery_password") or None,
-            discovery_snmp_community=form.get("discovery_snmp_community") or None,
+            discovery_username=new_username,
+            discovery_password=new_password_raw,
+            discovery_snmp_community=new_community,
             discovery_ssh_port=ssh_port,
         )
+
+        # Checagem rápida de conectividade (estilo Zabbix) -- só roda de
+        # novo quando os campos DAQUELE protocolo especificamente
+        # mudaram (ou nunca foi testado ainda), pra não deixar toda e
+        # qualquer edição inline (ex: só renomear o device) mais lenta
+        # com um teste de rede desnecessário. Mudar o IP de gerência
+        # invalida os dois testes (o alvo mudou), então reroda ambos.
+        ssh_fields_changed = (
+            (new_username is not None and new_username != old_username)
+            or bool(new_password_raw)
+            or (ssh_port is not None and ssh_port != old_ssh_port)
+            or ip_changed
+        )
+        snmp_fields_changed = (
+            (new_community is not None and new_community != old_community)
+            or ip_changed
+        )
+        never_tested_ssh = not cf_before.get("discovery_ssh_status")
+        never_tested_snmp = not cf_before.get("discovery_snmp_status")
+
+        ssh_status = ssh_status_detail = None
+        snmp_status = snmp_status_detail = None
+
+        if has_ssh:
+            if ssh_fields_changed or never_tested_ssh:
+                final_password_plain = new_password_raw or core.decrypt_secret(cf_before.get("discovery_password"))
+                ok, detail = core.test_ssh_connectivity(device, final_username, final_password_plain, final_ssh_port)
+                ssh_status, ssh_status_detail = ("ok" if ok else "error"), detail
+        elif cf_before.get("discovery_ssh_status"):
+            ssh_status, ssh_status_detail = "", ""
+
+        if has_snmp:
+            if snmp_fields_changed or never_tested_snmp:
+                ok, detail = core.test_snmp_connectivity(device, final_community)
+                snmp_status, snmp_status_detail = ("ok" if ok else "error"), detail
+        elif cf_before.get("discovery_snmp_status"):
+            snmp_status, snmp_status_detail = "", ""
+
+        if ssh_status is not None or snmp_status is not None:
+            core.set_connectivity_status(
+                device,
+                ssh_status=ssh_status, ssh_status_detail=ssh_status_detail,
+                snmp_status=snmp_status, snmp_status_detail=snmp_status_detail,
+            )
 
 
 # --------------------------------------------------------------------

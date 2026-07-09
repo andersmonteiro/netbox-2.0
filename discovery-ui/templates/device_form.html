@@ -57,26 +57,25 @@
           </div>
 
           <div class="mb-3">
-            <label class="form-label">Método de descoberta</label>
-            <select name="method" id="method-select" class="form-select" onchange="toggleMethodFields()">
-              <option value="">— nenhum —</option>
-              <option value="ssh" {% if cf.discovery_method == "ssh" %}selected{% endif %}>SSH</option>
-              <option value="snmp" {% if cf.discovery_method == "snmp" %}selected{% endif %}>SNMP (v2c)</option>
-            </select>
+            <label class="form-label">Descoberta: credenciais <span class="text-secondary">(preencha SSH e/ou SNMP -- não precisa escolher método, é detectado sozinho pelo que estiver preenchido)</span></label>
           </div>
 
-          <div id="ssh-fields" class="row">
-            <div class="col-md-6 mb-3">
+          <div class="row">
+            <div class="col-md-4 mb-3">
               <label class="form-label">Usuário SSH</label>
               <input type="text" name="discovery_username" class="form-control" value="{{ cf.discovery_username or '' }}">
             </div>
-            <div class="col-md-6 mb-3">
+            <div class="col-md-4 mb-3">
               <label class="form-label">Senha SSH {% if mode == "edit" %}<span class="text-secondary">(deixe em branco pra manter a atual)</span>{% endif %}</label>
               <input type="password" name="discovery_password" class="form-control">
             </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Porta SSH</label>
+              <input type="number" name="discovery_ssh_port" class="form-control" value="{{ cf.discovery_ssh_port or '' }}" placeholder="22">
+            </div>
           </div>
 
-          <div id="snmp-fields" class="mb-3">
+          <div class="mb-3">
             <label class="form-label">Community SNMP</label>
             <input type="text" name="discovery_snmp_community" class="form-control" value="{{ cf.discovery_snmp_community or '' }}">
           </div>
@@ -89,13 +88,4 @@
     </div>
   </div>
 </div>
-
-<script>
-  function toggleMethodFields() {
-    const method = document.getElementById('method-select').value;
-    document.getElementById('ssh-fields').style.display = (method === 'ssh') ? 'flex' : 'none';
-    document.getElementById('snmp-fields').style.display = (method === 'snmp') ? 'block' : 'none';
-  }
-  toggleMethodFields();
-</script>
 {% endblock %}

@@ -72,7 +72,7 @@
             <th>Região <i class="ti ti-info-circle text-secondary" title="Vem do Site escolhido -- não é editável direto aqui"></i></th>
             <th>Fabricante <i class="ti ti-info-circle text-secondary" title="Fabricante e modelo do device (Device Type)"></i></th>
             <th>IP de gerência <i class="ti ti-info-circle text-secondary" title="IP usado pra conectar e coletar dados do device"></i></th>
-            <th>Método <i class="ti ti-info-circle text-secondary" title="Como descobrir o device: SSH, SNMP, ou os dois juntos (roda os dois e cruza o resultado por interface -- útil quando um método sozinho não traz tudo). A forma de conectar via SSH é resolvida automaticamente pelo Fabricante -- não precisa escolher Platform manualmente"></i></th>
+            <th>Conectividade <i class="ti ti-info-circle text-secondary" title="SSH e SNMP -- cinza enquanto não há credencial preenchida, verde quando testado e comunicável, vermelho quando testado e falhou (credencial errada ou inalcançável). Basta preencher usuário/senha/porta (SSH) e/ou community (SNMP) que o teste roda sozinho; não precisa escolher método manualmente"></i></th>
             <th>Usuário (SSH) <i class="ti ti-info-circle text-secondary" title="Usuário de login SSH. Em MikroTik configurado como SNMP, é opcional -- só usado pra confirmar o vínculo VLAN/porta física e o comentário real da interface"></i></th>
             <th>Senha (SSH) <i class="ti ti-info-circle text-secondary" title="Senha de login SSH -- nunca é exibida, só substituída. Em MikroTik configurado como SNMP, é opcional"></i></th>
             <th>Porta SSH <i class="ti ti-info-circle text-secondary" title="Padrão 22 se deixar em branco"></i></th>
@@ -111,28 +111,7 @@
      Método e os badges de Status "grudados" nas linhas vizinhas. */
   #devices-table > tbody > tr > td { padding-top: .65rem; padding-bottom: .65rem; }
 
-  .method-cell { position: relative; }
-  .method-view { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; min-height: 1.5rem; border-bottom: 1px dashed transparent; }
-  .method-view:hover, .method-view:focus { border-bottom-color: var(--nbo-accent); outline: none; }
-  .method-chip { display: inline-flex; align-items: center; gap: 4px; }
-  .chip-x { cursor: pointer; opacity: .6; font-size: .9em; line-height: 1; }
-  .chip-x:hover { opacity: 1; color: var(--tblr-red); }
-  /* position:fixed (calculado em JS, ver openEditor()) em vez de
-     absolute -- a tabela fica dentro de .table-responsive, que por ter
-     overflow-x:auto acaba virando overflow-y:auto TAMBÉM (regra do CSS:
-     se um eixo não é "visible" o outro deixa de ser "visible" também),
-     e isso cortava/escondia o dropdown quando ele abria perto do fim da
-     tabela. position:fixed não é clipado pelo overflow de um ancestral
-     (só de scroll/containing block da viewport), então escapa desse
-     corte -- ver mesma explicação no comentário do JS. */
-  .method-editor {
-    position: fixed; z-index: 1050;
-    background: var(--nbo-surface); border: 1px solid var(--nbo-border);
-    border-radius: var(--tblr-border-radius); padding: .5rem .75rem;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, .4); white-space: nowrap;
-  }
-  .method-opt:disabled { cursor: not-allowed; }
-  .method-opt-label-disabled { opacity: .55; cursor: not-allowed; }
+  .proto-cell { white-space: nowrap; }
 </style>
 <script>
 (function () {
@@ -216,40 +195,6 @@
   // fora com o valor mudado); Esc cancela sem salvar.
   // ------------------------------------------------------------------
 
-  // device_type do Netmiko (não mais driver NAPALM) -- só informativo
-  // aqui no client-side pra decidir o MÉTODO sugerido (SSH/SNMP); quem
-  // resolve o device_type de verdade pra conectar é o servidor (ver
-  // discovery_core.resolve_ssh_device_type()), então não precisamos
-  // repetir o slug aqui.
-  var MANUFACTURER_RULES = [
-    { match: /cisco/i, method: 'ssh' },
-    { match: /juniper/i, method: 'ssh' },
-    { match: /arista/i, method: 'ssh' },
-    { match: /palo\s*alto/i, method: 'ssh' },
-    { match: /huawei/i, method: 'ssh', oltCheck: true },
-    { match: /mikrotik/i, method: 'snmp' },
-    { match: /datacom/i, method: 'snmp' },
-    { match: /zte/i, method: 'snmp' },
-    { match: /parks/i, method: 'snmp' },
-    { match: /fiberhome/i, method: 'snmp' },
-    { match: /vsol/i, method: 'snmp' },
-    { match: /intelbras/i, method: 'snmp' },
-  ];
-  var OLT_PATTERN = /\bolt\b|ma5\d{3}/i;
-
-  function suggestFor(manufacturer, deviceTypeModel) {
-    for (var i = 0; i < MANUFACTURER_RULES.length; i++) {
-      var rule = MANUFACTURER_RULES[i];
-      if (rule.match.test(manufacturer || '')) {
-        if (rule.oltCheck && OLT_PATTERN.test(deviceTypeModel || '')) {
-          return { method: 'snmp' };
-        }
-        return { method: rule.method };
-      }
-    }
-    return null;
-  }
-
   function saveRow(tr) {
     var id = tr.dataset.id;
     var fields = tr.querySelectorAll('.edit-val');
@@ -258,7 +203,6 @@
     var siteEl = tr.querySelector('.f-site');
     var deviceTypeEl = tr.querySelector('td:nth-child(5) .edit-val');
     var ipEl = tr.querySelector('td:nth-child(6) .edit-val');
-    var methodEl = tr.querySelector('.f-method');
     var usernameEl = tr.querySelector('td:nth-child(8) .edit-val');
     var passwordEl = tr.querySelector('td:nth-child(9) .edit-val');
     var sshPortEl = tr.querySelector('td:nth-child(10) .edit-val');
@@ -268,7 +212,6 @@
     data.set('site_id', siteEl.value);
     data.set('device_type_id', deviceTypeEl.value);
     data.set('primary_ip', (ipEl.value || '').trim());
-    data.set('method', methodEl.value);
     data.set('discovery_username', (usernameEl.value || '').trim());
     data.set('discovery_password', passwordEl.type === 'password' ? passwordEl.value : '');
     data.set('discovery_ssh_port', (sshPortEl.value || '').trim());
@@ -287,9 +230,11 @@
           // Só busca o HTML dessa linha de novo e troca ELA, em vez de dar
           // reload na página inteira -- preserva o scroll e o estado de
           // edição das outras linhas. Necessário (não só atualizar o texto
-          // localmente) porque mudar o Método pode revelar/esconder outras
-          // células (Usuário/Senha SSH, Community) que só o servidor sabe
-          // calcular certo (ver allow_ssh_cred em _device_row.html).
+          // localmente) porque salvar credencial dispara uma checagem real
+          // de conectividade no servidor (ver test_ssh_connectivity()/
+          // test_snmp_connectivity() em discovery_core.py) -- só ele sabe
+          // o resultado (verde/vermelho dos badges SSH/SNMP) e o novo
+          // Status ("pronto"/"incompleto").
           return fetch('/device/' + id + '/row')
             .then(function (r) { return r.text(); })
             .then(function (html) { replaceRow(tr, html); })
@@ -372,165 +317,6 @@
     }
   }
 
-  // ------------------------------------------------------------------
-  // Célula Método: em vez de um <select> de opção única, é um par de
-  // "chips" (SSH / SNMP) editável como checklist -- dá pra marcar os
-  // dois ao mesmo tempo (method="both", ver discovery_core.collect_both)
-  // ou remover um de cada vez clicando no "x" do chip, sem precisar abrir
-  // o checklist inteiro de novo.
-  // ------------------------------------------------------------------
-  function computeMethodValue(editorEl) {
-    var checked = Array.prototype.filter.call(
-      editorEl.querySelectorAll('.method-opt'),
-      function (cb) { return cb.checked; }
-    );
-    if (checked.length === 0) return '';
-    if (checked.length === 2) return 'both';
-    return checked[0].value;
-  }
-
-  function renderMethodView(viewEl, methodValue) {
-    // Re-render OTIMISTA e provisório -- só usado no instante entre o
-    // clique e a resposta do servidor (ver closeEditorAndMaybeSave() /
-    // saveRow() logo abaixo, que troca a linha inteira pelo HTML real
-    // vindo de _device_row.html assim que a gravação confirma). Por
-    // isso os chips selecionados aqui ficam num teal neutro ("marcado,
-    // salvando...") em vez de verde/vermelho -- decidir se a credencial
-    // está completa (pra colorir certo, ver ssh_configured/
-    // snmp_configured em app.py:_build_row) é responsabilidade do
-    // servidor, não dá pra replicar aqui sem duplicar aquela lógica.
-    var sshOn = methodValue === 'ssh' || methodValue === 'both';
-    var snmpOn = methodValue === 'snmp' || methodValue === 'both';
-    var parts = [
-      '<span class="badge badge-method method-chip ' + (sshOn ? 'bg-teal-lt' : 'bg-secondary-lt') + '">SSH' +
-        (sshOn ? '<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span>' : '') + '</span>',
-      '<span class="badge badge-method method-chip ' + (snmpOn ? 'bg-teal-lt' : 'bg-secondary-lt') + '">SNMP' +
-        (snmpOn ? '<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span>' : '') + '</span>',
-    ];
-    viewEl.innerHTML = parts.join(' ');
-  }
-
-  function wireMethodCell(td, tr) {
-    var viewEl = td.querySelector('.method-view');
-    var editorEl = td.querySelector('.method-editor');
-    var hiddenInput = td.querySelector('.f-method');
-    if (!viewEl || !editorEl || !hiddenInput) return;
-
-    function openEditor() {
-      // position:fixed (ver comentário no CSS .method-editor) --
-      // calculado aqui a partir da posição na TELA do chip clicado, não
-      // do pai (que é o padrão do position:absolute). Sem isso o
-      // dropdown ficava cortado pela .table-responsive quando abria
-      // perto do fim da tabela (overflow-x:auto vira overflow-y:auto
-      // também, então corta/esconde o que "vaza" verticalmente).
-      //
-      // TEM que ser calculado ANTES de esconder viewEl: um elemento
-      // com display:none não tem "caixa" nenhuma, então
-      // getBoundingClientRect() nele sempre devolve tudo zerado -- é
-      // isso que fazia o dropdown abrir cravado no canto superior
-      // esquerdo da PÁGINA (top:4px, left:0) em vez de do lado do chip
-      // clicado, e cliques dentro dele acabavam caindo em cima de
-      // qualquer elemento real que estivesse ali (navbar, outra linha),
-      // o que parecia um "refresh" da tela a cada clique.
-      var rect = viewEl.getBoundingClientRect();
-
-      viewEl.style.display = 'none';
-      editorEl.style.display = '';
-      editorEl.style.top = (rect.bottom + 4) + 'px';
-      editorEl.style.left = rect.left + 'px';
-
-      // Fabricante sem device_type SSH reconhecido aqui (ex: MikroTik, a
-      // maioria das OLTs) -- ver platform_resolved em
-      // app.py:_build_row(). Method="both" NUNCA fica pronto nesse caso
-      // (mesmo com usuário/senha/community preenchidos), então nem deixa
-      // marcar a opção SSH -- era isso que travava o status em
-      // "incompleto" sem nenhuma explicação.
-      var sshOpt = editorEl.querySelector('.method-opt[value="ssh"]');
-      if (sshOpt) {
-        var label = sshOpt.closest('label');
-        if (tr.dataset.platformResolved === 'false') {
-          sshOpt.checked = false;
-          sshOpt.disabled = true;
-          if (label) {
-            label.classList.add('method-opt-label-disabled');
-            label.title = 'Esse fabricante não tem um jeito de conectar via SSH reconhecido aqui -- use só SNMP.';
-          }
-        } else {
-          sshOpt.disabled = false;
-          if (label) {
-            label.classList.remove('method-opt-label-disabled');
-            label.title = '';
-          }
-        }
-      }
-
-      var first = editorEl.querySelector('.method-opt:not(:disabled)') || editorEl.querySelector('.method-opt');
-      if (first) first.focus();
-      // Sugestão automática só se ainda não tem nada configurado. O
-      // jeito de conectar via SSH (Platform, opcional) não é mais
-      // escolhido aqui -- é resolvido sozinho a partir do Fabricante do
-      // lado do servidor (ver discovery_core.resolve_ssh_device_type()).
-      if (!hiddenInput.value) {
-        var suggestion = suggestFor(tr.dataset.manufacturer, tr.dataset.deviceTypeModel);
-        if (suggestion) {
-          var opt = editorEl.querySelector('.method-opt[value="' + suggestion.method + '"]');
-          if (opt && !opt.disabled) opt.checked = true;
-        }
-      }
-    }
-
-    function closeEditorAndMaybeSave() {
-      var newValue = computeMethodValue(editorEl);
-      editorEl.style.display = 'none';
-      viewEl.style.display = '';
-      if (newValue !== hiddenInput.value) {
-        hiddenInput.value = newValue;
-        renderMethodView(viewEl, newValue);
-        saveRow(tr);
-      }
-    }
-
-    viewEl.addEventListener('click', function (e) {
-      if (e.target.classList.contains('chip-x')) {
-        // Remove só esse protocolo, sem abrir o checklist inteiro.
-        e.stopPropagation();
-        var proto = e.target.dataset.proto;
-        var current = hiddenInput.value;
-        var newValue = current === 'both' ? (proto === 'ssh' ? 'snmp' : 'ssh') : (current === proto ? '' : current);
-        if (newValue !== current) {
-          hiddenInput.value = newValue;
-          var cb = editorEl.querySelector('.method-opt[value="' + proto + '"]');
-          if (cb) cb.checked = false;
-          renderMethodView(viewEl, newValue);
-          saveRow(tr);
-        }
-        return;
-      }
-      openEditor();
-    });
-    viewEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditor(); }
-    });
-
-    editorEl.addEventListener('focusout', function (e) {
-      // Só fecha/salva quando o foco sai do editor inteiro -- não entre
-      // um checkbox e o outro dele mesmo.
-      if (editorEl.contains(e.relatedTarget)) return;
-      closeEditorAndMaybeSave();
-    });
-    editorEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') {
-        var savedList = hiddenInput.value ? (hiddenInput.value === 'both' ? ['ssh', 'snmp'] : [hiddenInput.value]) : [];
-        editorEl.querySelectorAll('.method-opt').forEach(function (cb) {
-          cb.checked = savedList.indexOf(cb.value) !== -1;
-        });
-        editorEl.style.display = 'none';
-        viewEl.style.display = '';
-      }
-      if (e.key === 'Enter') { closeEditorAndMaybeSave(); }
-    });
-  }
-
   function wireRow(tr) {
     var siteSelect = tr.querySelector('.f-site');
     var regionVal = tr.querySelector('.region-val');
@@ -540,8 +326,12 @@
         regionVal.textContent = (opt && opt.dataset.region) ? opt.dataset.region : '—';
       });
     }
+    // A célula de Conectividade (.proto-cell, ver _device_row.html) não
+    // tem .view-val/.edit-val -- é só um par de badges estáticos
+    // (SSH/SNMP) coloridos pelo servidor, não editável por clique.
+    // wireCell() já ignora sozinho qualquer <td> sem esses elementos,
+    // então não precisa de nenhum caso especial aqui.
     tr.querySelectorAll('td').forEach(function (td) {
-      if (td.classList.contains('method-cell')) { wireMethodCell(td, tr); return; }
       wireCell(td, tr);
     });
   }

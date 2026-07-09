@@ -1795,6 +1795,99 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
     return device
 
 
+def set_connectivity_status(device, ssh_status=None, ssh_status_detail=None, snmp_status=None, snmp_status_detail=None):
+    """Grava o resultado da checagem rápida de conectividade (ver
+    test_ssh_connectivity()/test_snmp_connectivity() abaixo) nos custom
+    fields do device -- é isso que colore os badges SSH/SNMP estilo
+    Zabbix no dashboard (ver app.py:_build_row/_device_row.html).
+    status vale "ok"/"error"/"" ("" limpa de volta pro cinza -- usado
+    quando o operador apaga a credencial daquele protocolo, ver
+    app.py:_apply_discovery_form()). Só grava o par status/detail que
+    vier com status != None, pra dar pra atualizar só um dos dois
+    protocolos sem mexer no outro."""
+    cf = dict(device.custom_fields or {})
+    if ssh_status is not None:
+        cf["discovery_ssh_status"] = ssh_status
+        cf["discovery_ssh_status_detail"] = ssh_status_detail or ""
+    if snmp_status is not None:
+        cf["discovery_snmp_status"] = snmp_status
+        cf["discovery_snmp_status_detail"] = snmp_status_detail or ""
+    device.update({"custom_fields": cf})
+    return device
+
+
+def test_ssh_connectivity(device, username, password, port=None, timeout=6):
+    """Checagem RÁPIDA e real de conectividade SSH: só abre a sessão e
+    autentica, não roda nenhum comando -- pensada pro indicador verde/
+    vermelho do dashboard (estilo Zabbix), disparada pela edição inline
+    sempre que usuário/senha/porta/IP mudam (ver
+    app.py:_apply_discovery_form()), então precisa ser rápida.
+
+    Usa device_type="generic_ssh" DE PROPÓSITO em vez de resolver o
+    driver certo do fabricante (ver resolve_ssh_device_type(), usado
+    pela coleta de verdade em collect_ssh()) -- aqui só queremos saber
+    se dá pra autenticar, e o passo de "session_preparation" de um
+    driver específico (desabilitar paginação, achar o prompt certo)
+    pode falhar por um motivo que não tem nada a ver com a credencial
+    estar certa ou o device estar alcançável (o que geraria um
+    vermelho enganoso). generic_ssh é mais tolerante nesse passo --
+    mesma escolha já usada em _collect_datacom() pra fabricante sem
+    driver Netmiko dedicado.
+
+    Retorna (True, None) se autenticou, (False, "motivo curto") se não.
+    """
+    if not device.primary_ip4:
+        return False, "sem IP de gerência"
+    host = str(device.primary_ip4).split("/")[0]
+    if not username or not password:
+        return False, "usuário/senha não preenchidos"
+
+    from netmiko import ConnectHandler, NetmikoAuthenticationException, NetmikoTimeoutException
+
+    try:
+        conn = ConnectHandler(
+            device_type="generic_ssh",
+            host=host,
+            username=username,
+            password=password,
+            port=int(port) if port else 22,
+            timeout=timeout,
+        )
+    except NetmikoAuthenticationException:
+        return False, "usuário/senha rejeitados pelo device"
+    except NetmikoTimeoutException:
+        return False, "timeout (IP/porta inacessível ou SSH desligado)"
+    except Exception as exc:
+        return False, str(exc)[:200]
+
+    try:
+        conn.disconnect()
+    except Exception:
+        pass
+    return True, None
+
+
+def test_snmp_connectivity(device, community, timeout=3, retries=0):
+    """Checagem RÁPIDA de conectividade SNMP: um snmpget só (sysName),
+    sem walk nenhum -- mesma ideia/uso do test_ssh_connectivity()
+    acima, pro indicador SNMP. Timeout/retries bem menores que os
+    usados na coleta de verdade (collect_snmp) porque isso roda a cada
+    edição inline da community, não pode travar a tela por muito
+    tempo."""
+    if not device.primary_ip4:
+        return False, "sem IP de gerência"
+    host = str(device.primary_ip4).split("/")[0]
+    if not community:
+        return False, "community não preenchida"
+    try:
+        value = snmp_get(host, community, OID_SYS_NAME, timeout=timeout, retries=retries)
+    except Exception as exc:
+        return False, str(exc)[:200]
+    if value:
+        return True, None
+    return False, "sem resposta (community errada ou SNMP desligado)"
+
+
 def create_device(nb, name, site_id, role_id, device_type_id, status="active"):
     return nb.dcim.devices.create(
         {

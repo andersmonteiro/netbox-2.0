@@ -70,6 +70,45 @@ FIELDS = {
         "description": "Community SNMPv2c (ex: 'public'), usado quando 'Descoberta: método' = SNMP. Texto plano -- ver aviso de segurança no script create_discovery_fields.py.",
         "weight": 130,
     },
+    # Os 4 campos abaixo guardam o resultado da checagem rápida de
+    # conectividade (estilo Zabbix) que roda sozinha sempre que o
+    # operador edita usuário/senha/porta SSH ou community SNMP no
+    # dashboard -- ver test_ssh_connectivity()/test_snmp_connectivity()/
+    # set_connectivity_status() em discovery_core.py e
+    # app.py:_apply_discovery_form(). Não são editáveis manualmente
+    # (weight alto só pra ficar no fim do formulário do NetBox); "ok" =
+    # badge verde, "error" = badge vermelho, vazio = badge cinza (ainda
+    # não testado / sem credencial).
+    "discovery_ssh_status": {
+        "type": "select",
+        "label": "Descoberta: status SSH (auto)",
+        "description": "Resultado da última checagem rápida de conectividade SSH -- preenchido automaticamente pelo NetBox Oracle, não edite na mão.",
+        "choice_set": {
+            "extra_choices": [["ok", "OK"], ["error", "Falha"]],
+        },
+        "weight": 140,
+    },
+    "discovery_ssh_status_detail": {
+        "type": "text",
+        "label": "Descoberta: detalhe do status SSH (auto)",
+        "description": "Motivo da falha na última checagem de conectividade SSH (se houver) -- preenchido automaticamente.",
+        "weight": 141,
+    },
+    "discovery_snmp_status": {
+        "type": "select",
+        "label": "Descoberta: status SNMP (auto)",
+        "description": "Resultado da última checagem rápida de conectividade SNMP -- preenchido automaticamente pelo NetBox Oracle, não edite na mão.",
+        "choice_set": {
+            "extra_choices": [["ok", "OK"], ["error", "Falha"]],
+        },
+        "weight": 150,
+    },
+    "discovery_snmp_status_detail": {
+        "type": "text",
+        "label": "Descoberta: detalhe do status SNMP (auto)",
+        "description": "Motivo da falha na última checagem de conectividade SNMP (se houver) -- preenchido automaticamente.",
+        "weight": 151,
+    },
 }
 
 

@@ -14,11 +14,6 @@
   data-region="{{ r.region }}"
   data-manufacturer="{{ r.manufacturer }}"
   data-device-type-model="{{ r.device_type_model }}"
-  {#- Calculado no servidor (ver platform_resolved em app.py:_build_row) --
-      dá pra desabilitar o chip "SSH" no editor de Método pra
-      fabricantes sem device_type reconhecido (ex: MikroTik), em vez de deixar
-      escolher "SSH + SNMP" e o device nunca conseguir ficar "pronto". #}
-  data-platform-resolved="{{ 'true' if r.platform_resolved else 'false' }}"
 >
   <td>
     <input
@@ -55,59 +50,38 @@
     <span class="view-val click-edit text-secondary" tabindex="0">{{ r.primary_ip or "—" }}</span>
     <input type="text" class="edit-val form-control form-control-sm" value="{{ r.primary_ip or '' }}" style="display:none" placeholder="ex: 10.0.0.1">
   </td>
-  <td class="method-cell">
-    <span class="method-view" tabindex="0">
-      {# Estilo Zabbix: os dois protocolos SEMPRE aparecem -- cinza quando
-         não fazem parte do Método escolhido, verde quando selecionado e
-         com credencial completa (ssh_configured/snmp_configured, ver
-         app.py:_build_row), vermelho quando selecionado mas falta
-         credencial. Dá pra ver de longe qual protocolo específico está
-         faltando configurar, sem precisar abrir a linha. #}
-      <span class="badge badge-method method-chip {% if 'ssh' in r.method_list %}{{ 'bg-success-lt' if r.ssh_configured else 'bg-red-lt' }}{% else %}bg-secondary-lt{% endif %}">SSH{% if 'ssh' in r.method_list %}<span class="chip-x" data-proto="ssh" title="Remover SSH">&times;</span>{% endif %}</span>
-      <span class="badge badge-method method-chip {% if 'snmp' in r.method_list %}{{ 'bg-success-lt' if r.snmp_configured else 'bg-red-lt' }}{% else %}bg-secondary-lt{% endif %}">SNMP{% if 'snmp' in r.method_list %}<span class="chip-x" data-proto="snmp" title="Remover SNMP">&times;</span>{% endif %}</span>
-    </span>
-    <div class="method-editor" style="display:none">
-      <label class="form-check mb-1"><input type="checkbox" class="form-check-input method-opt" value="ssh" {% if 'ssh' in r.method_list %}checked{% endif %}> SSH</label>
-      <label class="form-check mb-0"><input type="checkbox" class="form-check-input method-opt" value="snmp" {% if 'snmp' in r.method_list %}checked{% endif %}> SNMP</label>
-    </div>
-    <input type="hidden" class="f-method" value="{{ r.method or '' }}">
+  <td class="proto-cell">
+    {# Estilo Zabbix: SSH e SNMP aparecem SEMPRE, sem seleção manual --
+       o método (usado só pro badge "Status"/pronto, ver
+       app.py:_build_row) é derivado sozinho a partir de quais
+       credenciais estão preenchidas (ver app.py:_apply_discovery_form).
+       Cinza = ainda sem credencial preenchida pra esse protocolo;
+       verde = testado e comunicável (checagem rápida REAL, ver
+       test_ssh_connectivity()/test_snmp_connectivity() em
+       discovery_core.py); vermelho = testado e falhou (credencial
+       errada ou inalcançável) -- passa o mouse pro motivo. O teste
+       roda de novo sozinho sempre que o operador edita a credencial
+       daquele protocolo (ou o IP), sem precisar clicar em nada aqui. #}
+    <span class="badge badge-method {{ 'bg-success-lt' if r.ssh_status == 'ok' else ('bg-red-lt' if r.ssh_status == 'error' else 'bg-secondary-lt') }}"
+      {% if r.ssh_status_detail %}title="{{ r.ssh_status_detail }}"{% endif %}>SSH</span>
+    <span class="badge badge-method {{ 'bg-success-lt' if r.snmp_status == 'ok' else ('bg-red-lt' if r.snmp_status == 'error' else 'bg-secondary-lt') }}"
+      {% if r.snmp_status_detail %}title="{{ r.snmp_status_detail }}"{% endif %}>SNMP</span>
   </td>
-  {% set allow_ssh_cred = r.method in ('ssh', 'both') or (r.method == 'snmp' and 'mikrotik' in (r.manufacturer or '')|lower) %}
   <td>
-    {% if allow_ssh_cred %}
     <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_username or "—" }}</span>
     <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_username }}" style="display:none" autocomplete="off">
-    {% else %}
-    <span class="text-secondary">—</span>
-    <input type="hidden" class="edit-val" value="{{ r.cf_username }}">
-    {% endif %}
   </td>
   <td>
-    {% if allow_ssh_cred %}
     <span class="view-val click-edit text-secondary" tabindex="0">{{ "definida" if r.has_ssh_cred else "—" }}</span>
     <input type="password" class="edit-val form-control form-control-sm" style="display:none" placeholder="deixe em branco pra manter" autocomplete="new-password">
-    {% else %}
-    <span class="text-secondary">—</span>
-    <input type="hidden" class="edit-val" value="">
-    {% endif %}
   </td>
   <td>
-    {% if allow_ssh_cred %}
     <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_ssh_port or "22" }}</span>
     <input type="number" class="edit-val form-control form-control-sm" value="{{ r.cf_ssh_port }}" style="display:none" placeholder="22">
-    {% else %}
-    <span class="text-secondary">—</span>
-    <input type="hidden" class="edit-val" value="{{ r.cf_ssh_port }}">
-    {% endif %}
   </td>
   <td>
-    {% if r.method in ('snmp', 'both') %}
     <span class="view-val click-edit text-secondary" tabindex="0">{{ r.cf_snmp_community or "—" }}</span>
     <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_snmp_community }}" style="display:none" autocomplete="off">
-    {% else %}
-    <span class="text-secondary">—</span>
-    <input type="hidden" class="edit-val" value="{{ r.cf_snmp_community }}">
-    {% endif %}
   </td>
   <td>
     {% if r.ready %}
