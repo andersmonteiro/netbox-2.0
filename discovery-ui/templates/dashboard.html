@@ -174,11 +174,25 @@
   // ------------------------------------------------------------------
   var discoverForm = document.getElementById('discover-form');
   var discoverBtn = document.getElementById('discover-submit-btn');
+  // Mesmo indicador de carregamento da tela de Revisão (ver review.html
+  // e .btn-loading/.nbo-spin-logo em base.html): cinza neutro (em vez do
+  // teal ilegível do estado disabled padrão) + a logo do navbar girando
+  // ao lado do texto, em vez do spinner genérico do Bootstrap.
+  var NBO_SPINNER_SVG = '<svg viewBox="-50 -50 100 100" width="14" height="14" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" class="nbo-spin-logo">' +
+    '<path d="M -6,-42 A 42,42 0 0 1 32,-28" stroke-width="13"/>' +
+    '<path d="M 32,-28 A 42,42 0 0 1 42,6" stroke-width="9"/>' +
+    '<path d="M 42,6 A 42,42 0 0 1 22,36" stroke-width="5"/>' +
+    '<path d="M 6,42 A 42,42 0 0 1 -32,28" stroke-width="13"/>' +
+    '<path d="M -32,28 A 42,42 0 0 1 -42,-6" stroke-width="9"/>' +
+    '<path d="M -42,-6 A 42,42 0 0 1 -22,-36" stroke-width="5"/>' +
+  '</svg>';
   discoverForm.addEventListener('submit', function () {
     var anyChecked = discoverForm.querySelector('.dev-cb:checked');
     if (!anyChecked) return;
     discoverBtn.disabled = true;
-    discoverBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Descobrindo, aguarde...';
+    discoverBtn.classList.add('btn-loading');
+    discoverBtn.blur();
+    discoverBtn.innerHTML = NBO_SPINNER_SVG + 'Descobrindo, aguarde...';
   });
 
   // ------------------------------------------------------------------

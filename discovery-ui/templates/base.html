@@ -228,6 +228,47 @@
     }
 
     .required-star::after { content: " *"; color: var(--tblr-red); }
+
+    /* Botão desabilitado durante um envio (fetch() na Revisão, submit no
+       "Iniciar Descoberta") -- sem isso, o estado ":active"/disabled do
+       Bootstrap usava o teal (--tblr-primary), com baixo contraste e
+       difícil de ler. Cinza neutro em qualquer estado enquanto processa.
+       Compartilhado (não só review.html) pra dar pra usar também no botão
+       "Iniciar Descoberta" da dashboard. display:inline-flex + gap aqui
+       (em vez de contar só com o padrão do Tabler) garante que a
+       logo giratória (.nbo-spin-logo, ver abaixo) fique DO LADO do texto,
+       nunca por cima -- era isso que causava a sobreposição antes. */
+    .btn-loading, .btn-loading:hover, .btn-loading:focus, .btn-loading:active, .btn-loading:disabled {
+      background: #3a3f42 !important;
+      border-color: #3a3f42 !important;
+      color: rgba(255, 255, 255, .75) !important;
+      box-shadow: none !important;
+      opacity: 1 !important;
+      cursor: default !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      white-space: nowrap !important;
+      gap: .4rem;
+    }
+    [data-bs-theme=light] .btn-loading,
+    [data-bs-theme=light] .btn-loading:hover,
+    [data-bs-theme=light] .btn-loading:focus,
+    [data-bs-theme=light] .btn-loading:active,
+    [data-bs-theme=light] .btn-loading:disabled {
+      background: #c8cbcd !important;
+      border-color: #c8cbcd !important;
+      color: rgba(4, 7, 10, .6) !important;
+    }
+
+    /* Logo giratória usada como indicador de carregamento nos botões
+       acima, no lugar do spinner genérico do Bootstrap (era o spinner
+       padrão -- spinner-border -- que ficava se sobrepondo ao texto em
+       vez de ficar ao lado). O SVG em si é montado no JS de cada página
+       (dashboard.html / review.html), reaproveitando o mesmo desenho do
+       logo do navbar; aqui só a animação de giro. */
+    @keyframes nbo-spin { to { transform: rotate(360deg); } }
+    .nbo-spin-logo { animation: nbo-spin .9s linear infinite; flex-shrink: 0; display: block; }
   </style>
 </head>
 <body>
