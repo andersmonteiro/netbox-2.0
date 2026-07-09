@@ -219,7 +219,13 @@
 <body>
   <div class="page">
     <header class="navbar navbar-expand-md navbar-dark d-print-none">
-      <div class="container-xl d-flex align-items-center">
+      <!-- container-fluid (não container-xl) -- container-xl tem largura
+           máxima e fica CENTRALIZADO na tela, sobrando um respiro igual
+           dos dois lados; numa tela larga isso faz a logo não ficar
+           colada na borda esquerda nem o usuário na direita. Mesmo
+           padrão de container que dashboard.html/review.html já usam
+           pro conteúdo (ver container_class nesses templates). -->
+      <div class="container-fluid px-4 d-flex align-items-center">
         <a href="{{ url_for('dashboard') if session.get('logged_in') else url_for('login') }}" class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
           <i class="ti ti-radar-2 fs-2 me-2" style="color: var(--nbo-accent);"></i>
           <span class="fw-bold">NetBox<span class="accent">Oracle</span></span>
@@ -247,7 +253,7 @@
         <div class="ms-auto navbar-actions" style="display:table !important; height:2.5rem !important;">
           <div class="nav-item dropdown" style="display:table-cell !important; vertical-align:middle !important; padding-right:.75rem;">
             <a href="#" class="nav-link" data-bs-toggle="dropdown" title="Status da API do NetBox"
-               style="display:inline-block !important; vertical-align:middle !important; line-height:normal !important;">
+               style="display:inline-block !important; vertical-align:middle !important; line-height:1 !important;">
               <span id="api-status-badge" class="badge bg-secondary-lt" style="vertical-align:middle !important;">
                 <span id="api-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;vertical-align:middle;"></span>
                 <span id="api-status-text" style="vertical-align:middle;">verificando…</span>
@@ -259,13 +265,13 @@
           </div>
           <div style="display:table-cell !important; vertical-align:middle !important; padding-right:.75rem;">
             <a href="#" class="nav-link" id="theme-toggle-btn" title="Alternar tema claro/escuro"
-               style="display:inline-block !important; vertical-align:middle !important; line-height:normal !important;">
+               style="display:inline-block !important; vertical-align:middle !important; line-height:1 !important;">
               <i class="ti" id="theme-toggle-icon" style="vertical-align:middle;"></i>
             </a>
           </div>
           <div class="nav-item dropdown" style="display:table-cell !important; vertical-align:middle !important;">
             <a href="#" class="nav-link text-reset" data-bs-toggle="dropdown"
-               style="display:inline-block !important; vertical-align:middle !important; line-height:normal !important;">
+               style="display:inline-block !important; vertical-align:middle !important; line-height:1 !important;">
               <span class="fw-medium" style="vertical-align:middle;">{{ session.get('username') }}</span>
               <i class="ti ti-chevron-down ms-1 text-secondary" style="font-size: .8rem; vertical-align:middle;"></i>
             </a>
