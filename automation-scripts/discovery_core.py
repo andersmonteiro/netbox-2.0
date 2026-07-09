@@ -400,6 +400,14 @@ def collect_mikrotik_interface_details(host, username, password, port=None):
       traz o vínculo VLAN -> porta física (campo "interface=") pras
       entradas tipo vlan -- esse campo só aparece nessa consulta
       específica de VLAN.
+    - '/interface pppoe-client print terse': mesmo caso da VLAN -- uma
+      interface pppoe-client (ex: "pppoe-out1") também tem uma porta
+      física "por trás" dela (campo "interface="), só que esse vínculo
+      também só aparece nessa consulta específica de PPPoE, não no
+      "/interface print terse" genérico. Consulta separada e opcional:
+      se o device não tiver nenhum client PPPoE configurado (ou a
+      versão do RouterOS não reconhecer o comando), a saída vem vazia
+      ou dá erro -- não afeta o resto (comment/VLAN já coletados acima).
 
     Retorna {nome_da_interface: {"comment": str|None, "parent": str|None}}.
 
@@ -420,6 +428,10 @@ def collect_mikrotik_interface_details(host, username, password, port=None):
     try:
         output = conn.send_command("/interface print terse without-paging")
         vlan_output = conn.send_command("/interface vlan print terse without-paging")
+        try:
+            pppoe_output = conn.send_command("/interface pppoe-client print terse without-paging")
+        except Exception:
+            pppoe_output = ""
     finally:
         try:
             conn.disconnect()
@@ -437,6 +449,15 @@ def collect_mikrotik_interface_details(host, username, password, port=None):
         }
 
     for entry in _ros_split_entries(vlan_output):
+        name = _ros_terse_value(entry, "name")
+        if not name:
+            continue
+        parent = _ros_terse_value(entry, "interface")
+        details.setdefault(name, {"comment": None, "parent": None})
+        if parent:
+            details[name]["parent"] = parent
+
+    for entry in _ros_split_entries(pppoe_output or ""):
         name = _ros_terse_value(entry, "name")
         if not name:
             continue
@@ -1226,13 +1247,18 @@ def guess_interface_type(name):
 
 
 def is_vlan_ifname(name):
-    """True se o nome parece uma sub-interface lógica que faz sentido
-    vincular a uma porta física na revisão -- cobre tanto o padrão MikroTik
-    (vlanN, sem relação de nome com a porta física) quanto o padrão
-    dotted-notation usado por Cisco/Juniper/Huawei (ex: 'Gi0/1.100',
-    'ge-0/0/1.100', onde o sufixo depois do ponto é o ID da VLAN)."""
+    """True se o nome parece uma interface lógica que faz sentido vincular
+    a uma porta física na revisão -- cobre o padrão MikroTik (vlanN, sem
+    relação de nome com a porta física), o padrão dotted-notation usado
+    por Cisco/Juniper/Huawei (ex: 'Gi0/1.100', 'ge-0/0/1.100', onde o
+    sufixo depois do ponto é o ID da VLAN) e pppoe-client do MikroTik
+    (ex: 'pppoe-out1' -- não é VLAN de verdade, mas tem o mesmo conceito
+    de "porta física por trás", confirmado via '/interface pppoe-client
+    print terse' em collect_mikrotik_interface_details())."""
     n = (name or "").strip().lower()
     if n.startswith("vlan") or n.startswith("vl"):
+        return True
+    if n.startswith("pppoe"):
         return True
     if "." in n and n.rsplit(".", 1)[-1].isdigit():
         return True

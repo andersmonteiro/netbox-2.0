@@ -55,7 +55,7 @@
               <th class="col-check"><input type="checkbox" class="form-check-input m-0" checked onclick="this.closest('table').querySelectorAll('.if-cb').forEach(c => c.checked = this.checked)"></th>
               <th class="col-iface">Interface</th>
               <th class="col-type">Tipo <i class="ti ti-info-circle text-secondary" title="Sugerido automaticamente pelo nome -- confira e troque se precisar"></i></th>
-              <th class="col-parent">Interface física (VLAN) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN -- escolha a porta física onde essa VLAN está"></i></th>
+              <th class="col-parent">Interface física (VLAN/PPPoE) <i class="ti ti-info-circle text-secondary" title="Só faz sentido pra interfaces de VLAN ou pppoe-client (MikroTik) -- escolha a porta física por trás dela"></i></th>
               <th class="col-lag">LAG <i class="ti ti-info-circle text-secondary" title="Preenchido automaticamente quando detectado no device (Eth-Trunk no Huawei, Parent-LAG no Datacom). Se a interface LAG ainda não existir no NetBox, ela é criada ao aprovar. Deixe em branco se essa porta não faz parte de nenhuma LAG."></i></th>
               <th class="col-status">Status</th>
               <th class="col-ip">IP (descoberto) <i class="ti ti-info-circle text-secondary" title="IP(s) configurado(s) na porta, lido agora via SNMP e/ou SSH -- ao aprovar, é isso que vai ser gravado no NetBox"></i></th>
