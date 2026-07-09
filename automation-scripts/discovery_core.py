@@ -30,6 +30,47 @@ except ImportError:  # pragma: no cover -- ambiente sem 'cryptography' instalado
     InvalidToken = Exception
 
 # --------------------------------------------------------------------
+# Override de templates TextFSM (ntc-templates) -- alguns templates
+# publicados pelo pacote têm um catch-all "-> Error" pra qualquer linha
+# não prevista, o que faz UMA linha de saída fora do esperado (ex: um
+# bloco de diagnóstico óptico/DWDM que aparece em interfaces de core
+# como as do NE8000, "Link quality grade : GOOD") derrubar a coleta
+# INTEIRA de interfaces do device com "State Error" -- confirmado contra
+# device real do cliente. Os arquivos em textfsm_overrides/ são cópias
+# desses templates com esse catch-all trocado por um "ignora e segue"
+# (mesmo efeito prático: só não capturamos o dado daquela linha, que a
+# gente não usa mesmo -- mas não quebra mais a coleta toda por causa
+# dela). Aplicado copiando por cima do arquivo já instalado pelo pip,
+# de forma best-effort (nunca impede o resto do módulo de carregar) e
+# idempotente (roda de novo a cada import sem problema, então sobrevive
+# a um `pip install --upgrade ntc-templates` que reinstale o original).
+# --------------------------------------------------------------------
+
+
+def _install_textfsm_overrides():
+    overrides_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "textfsm_overrides")
+    if not os.path.isdir(overrides_dir):
+        return
+    try:
+        import ntc_templates
+
+        dest_dir = os.path.join(os.path.dirname(ntc_templates.__file__), "templates")
+        if not os.path.isdir(dest_dir):
+            return
+        for fname in os.listdir(overrides_dir):
+            if not fname.endswith(".textfsm"):
+                continue
+            with open(os.path.join(overrides_dir, fname), "rb") as src:
+                content = src.read()
+            with open(os.path.join(dest_dir, fname), "wb") as dst:
+                dst.write(content)
+    except Exception:
+        pass  # best-effort -- pior caso, volta a usar o template original do pip
+
+
+_install_textfsm_overrides()
+
+# --------------------------------------------------------------------
 # Cifra da senha de descoberta (discovery_password) antes de gravar no
 # NetBox -- sem isso, ela ficava salva em TEXTO PURO num custom field,
 # visível pra qualquer usuário com acesso de leitura ao device no NetBox
@@ -1418,6 +1459,7 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
             cf["discovery_username"] = discovery_username
         if discovery_password is not None:
             cf["discovery_password"] = encrypt_secret(discovery_password)
+        if discovery_ssh_port is not None:
             cf["discovery_ssh_port"] = discovery_ssh_port
     if method in ("snmp", "both"):
         if discovery_snmp_community is not None:

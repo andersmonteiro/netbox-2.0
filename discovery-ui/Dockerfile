@@ -20,6 +20,12 @@ COPY discovery-ui/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY automation-scripts/discovery_core.py .
+# Templates TextFSM patched (ver _install_textfsm_overrides() em
+# discovery_core.py) -- ficam em /app/textfsm_overrides, irmão de
+# discovery_core.py, porque o código resolve o caminho relativo a
+# __file__. Aplicados por cima dos templates do ntc-templates (pip) toda
+# vez que discovery_core é importado, não só no build da imagem.
+COPY automation-scripts/textfsm_overrides ./textfsm_overrides
 # Script de migração one-off (cifra discovery_password que ainda estiver
 # em texto puro, ver encrypt_secret()/decrypt_secret() em
 # discovery_core.py) -- copiado igual discovery_core.py (achatado direto
