@@ -37,6 +37,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, session, url_for
+from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -727,19 +728,49 @@ def _safe_output_path(filename):
     return path
 
 
+def _is_ajax():
+    """A tela de Revisão manda essa header via fetch() (ver review.html)
+    pra processar Aprovar/Descartar sem recarregar a página inteira --
+    assim a confirmação de um device não some quando o operador revisa
+    o próximo (cada recarregamento de página derruba o flash message
+    anterior). Requests normais de formulário (JS desabilitado, ou
+    qualquer outro chamador) continuam com o fluxo flash+redirect de
+    sempre."""
+    return request.headers.get("X-Requested-With") == "fetch"
+
+
+def _device_success_message(device_name, changes):
+    """Monta a mensagem de sucesso com o nome do device em destaque
+    (classe .text-accent, cor teal) -- usada tanto no flash tradicional
+    quanto na resposta JSON pro fetch() da tela de Revisão, pra manter
+    a mesma cara nos dois casos."""
+    msg = Markup(f'<span class="text-accent">{escape(device_name)}</span> enviado com sucesso ao NetBox')
+    if changes:
+        msg += Markup(f" ({escape(', '.join(changes))})")
+    return msg
+
+
 @app.route("/review/apply/<path:filename>", methods=["POST"])
 @login_required
 def review_apply(filename):
+    ajax = _is_ajax()
+
     path = _safe_output_path(filename)
     if not path or not path.exists():
-        flash("Arquivo de descoberta não encontrado (talvez já tenha sido processado).", "error")
+        msg = "Arquivo de descoberta não encontrado (talvez já tenha sido processado)."
+        if ajax:
+            return {"ok": False, "message": msg}, 404
+        flash(msg, "error")
         return redirect(url_for("review"))
 
     data = json.loads(path.read_text(encoding="utf-8"))
     nb = get_nb()
     device = nb.dcim.devices.get(data.get("device_id")) if data.get("device_id") else None
     if not device:
-        flash(f"Device {data.get('device_name', '?')} não existe mais no NetBox.", "error")
+        msg = f"Device {data.get('device_name', '?')} não existe mais no NetBox."
+        if ajax:
+            return {"ok": False, "message": msg}, 404
+        flash(msg, "error")
         return redirect(url_for("review"))
 
     interface_filter = {}
@@ -758,19 +789,34 @@ def review_apply(filename):
         }
         idx += 1
 
-    changes = core.apply_device_result(nb, device, data, interface_filter=interface_filter)
+    # A gravação no NetBox pode falhar por motivos fora do nosso
+    # controle (ex: API rejeitando um campo específico com 400 -- já
+    # aconteceu com serial e com type/parent de VLAN) -- sem esse
+    # try/except, uma exceção aqui virava um 500 genérico do Flask (a
+    # "Internal Server Error" sem detalhe nenhum pro operador, só
+    # visível no log do container). Agora a mensagem de erro real
+    # aparece na tela.
+    try:
+        changes = core.apply_device_result(nb, device, data, interface_filter=interface_filter)
+    except Exception as exc:
+        msg = f"Erro ao gravar {device.name} no NetBox: {exc}"
+        if ajax:
+            return {"ok": False, "message": msg}, 500
+        flash(msg, "error")
+        return redirect(url_for("review"))
 
     APPLIED_DIR.mkdir(exist_ok=True)
     path.rename(APPLIED_DIR / path.name)
 
     # Mensagem inequívoca de sucesso primeiro (o operador quer confirmar
     # rápido que foi gravado), com o detalhamento técnico entre
-    # parênteses só como complemento -- antes disso a mensagem começava
-    # direto pelas contagens, o que não deixava claro que era uma
-    # confirmação de sucesso.
-    msg = f"{device.name} enviado com sucesso ao NetBox"
-    if changes:
-        msg += f" ({', '.join(changes)})"
+    # parênteses só como complemento, e o nome do device em destaque
+    # (ver _device_success_message).
+    msg = _device_success_message(device.name, changes)
+
+    if ajax:
+        return {"ok": True, "message": str(msg)}
+
     flash(msg, "success")
     return redirect(url_for("review"))
 
@@ -778,11 +824,20 @@ def review_apply(filename):
 @app.route("/review/discard/<path:filename>", methods=["POST"])
 @login_required
 def review_discard(filename):
+    ajax = _is_ajax()
+
     path = _safe_output_path(filename)
     if path and path.exists():
         DISCARDED_DIR.mkdir(exist_ok=True)
         path.rename(DISCARDED_DIR / path.name)
-        flash(f"Descoberta de '{path.stem}' descartada (nada foi gravado no NetBox).", "success")
+        msg = f"Descoberta de '{path.stem}' descartada (nada foi gravado no NetBox)."
+        if ajax:
+            return {"ok": True, "message": msg}
+        flash(msg, "success")
+        return redirect(url_for("review"))
+
+    if ajax:
+        return {"ok": False, "message": "Arquivo de descoberta não encontrado (talvez já tenha sido processado)."}, 404
     return redirect(url_for("review"))
 
 

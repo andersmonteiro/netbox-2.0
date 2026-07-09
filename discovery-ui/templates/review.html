@@ -18,9 +18,10 @@
 {% endif %}
 
 {% for item in items %}
-<div class="card mb-3">
+<div class="card mb-3" id="card-{{ loop.index }}">
   <div
     class="card-header"
+    id="card-header-{{ loop.index }}"
     style="cursor: pointer;"
     data-bs-toggle="collapse"
     data-bs-target="#dev-collapse-{{ loop.index }}"
@@ -28,14 +29,14 @@
     aria-expanded="true"
     aria-controls="dev-collapse-{{ loop.index }}"
   >
-    <h3 class="card-title">
+    <h3 class="card-title" id="card-title-{{ loop.index }}">
       <i class="ti ti-chevron-down me-1 review-chevron"></i>
       {{ item.data.device_name }} <span class="badge bg-teal-lt badge-method ms-2">{{ "SSH + SNMP" if item.data.method == "both" else item.data.method|upper }}</span>
     </h3>
-    <div class="card-actions text-secondary">{{ item.n_interfaces }} interface(s), {{ item.n_up }} up</div>
+    <div class="card-actions text-secondary" id="card-actions-{{ loop.index }}">{{ item.n_interfaces }} interface(s), {{ item.n_up }} up</div>
   </div>
   <div class="collapse show" id="dev-collapse-{{ loop.index }}">
-  <div class="card-body">
+  <div class="card-body" id="card-body-{{ loop.index }}">
     {% if item.data.sys_name %}<div class="text-secondary">sys_name: {{ item.data.sys_name }}</div>{% endif %}
     {% if item.data.serial %}<div class="text-secondary mb-2">serial: {{ item.data.serial }}</div>{% endif %}
 
@@ -46,7 +47,7 @@
     {% endif %}
 
     {% if item.data.interfaces %}
-    <form method="post" action="{{ url_for('review_apply', filename=item.filename) }}">
+    <form method="post" action="{{ url_for('review_apply', filename=item.filename) }}" data-review-apply data-index="{{ loop.index }}">
       <div class="table-responsive">
         <table class="table table-vcenter card-table table-review">
           <thead>
@@ -105,7 +106,7 @@
     </form>
     {% endif %}
 
-    <form method="post" action="{{ url_for('review_discard', filename=item.filename) }}" class="mt-2" onsubmit="return confirm('Descartar essa descoberta sem gravar nada no NetBox?');">
+    <form method="post" action="{{ url_for('review_discard', filename=item.filename) }}" class="mt-2" data-review-discard data-index="{{ loop.index }}">
       <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="ti ti-trash me-1"></i>Descartar</button>
     </form>
   </div>
@@ -139,5 +140,115 @@
   .table-review .col-ip { width: 22%; }
   .table-review .col-desc { width: 30%; }
 </style>
+
+<script>
+  // Aprovar/Descartar são enviados via fetch() em vez de submit normal
+  // de formulário -- assim a página NÃO recarrega a cada ação, e a
+  // confirmação de um device (mostrada no próprio espaço do
+  // cabeçalho/nome, ver troca de card-title-N abaixo) fica visível na
+  // tela enquanto o operador revisa os próximos devices, em vez de
+  // sumir no reload seguinte (era esse o problema antes: cada "Aprovar"
+  // dava um redirect completo, que derrubava o flash message do device
+  // anterior).
+  (function () {
+    function setLoading(btn, loadingText) {
+      if (!btn) return;
+      btn.dataset.originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + loadingText;
+    }
+
+    function restoreButton(btn) {
+      if (!btn) return;
+      btn.disabled = false;
+      if (btn.dataset.originalHtml) btn.innerHTML = btn.dataset.originalHtml;
+    }
+
+    function showInlineError(idx, message) {
+      var body = document.getElementById('card-body-' + idx);
+      if (body) {
+        body.insertAdjacentHTML('afterbegin', '<div class="alert alert-danger">' + message + '</div>');
+      }
+    }
+
+    function sendForm(form) {
+      return fetch(form.action, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'fetch' },
+        body: new FormData(form),
+      }).then(function (resp) {
+        return resp.json().catch(function () {
+          // Resposta não-JSON (ex: erro de proxy/servidor antes de
+          // chegar na view) -- trata como falha genérica.
+          return { ok: false, message: 'Erro inesperado (HTTP ' + resp.status + ').' };
+        });
+      });
+    }
+
+    document.querySelectorAll('form[data-review-apply]').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var idx = form.dataset.index;
+        var btn = form.querySelector('button');
+        setLoading(btn, 'Enviando...');
+
+        sendForm(form)
+          .then(function (data) {
+            if (data.ok) {
+              var headerTitle = document.getElementById('card-title-' + idx);
+              var headerActions = document.getElementById('card-actions-' + idx);
+              var headerEl = document.getElementById('card-header-' + idx);
+              var collapseEl = document.getElementById('dev-collapse-' + idx);
+              if (headerTitle) {
+                headerTitle.innerHTML = '<i class="ti ti-circle-check-filled me-1" style="color: var(--nbo-accent);"></i>' + data.message;
+              }
+              if (headerActions) headerActions.textContent = '';
+              if (collapseEl) collapseEl.classList.remove('show');
+              if (headerEl) {
+                headerEl.removeAttribute('data-bs-toggle');
+                headerEl.removeAttribute('role');
+                headerEl.removeAttribute('aria-controls');
+                headerEl.style.cursor = 'default';
+              }
+            } else {
+              showInlineError(idx, data.message || 'Não foi possível gravar no NetBox.');
+              restoreButton(btn);
+            }
+          })
+          .catch(function () {
+            showInlineError(idx, 'Erro de rede ao enviar. Tente novamente.');
+            restoreButton(btn);
+          });
+      });
+    });
+
+    document.querySelectorAll('form[data-review-discard]').forEach(function (form) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (!confirm('Descartar essa descoberta sem gravar nada no NetBox?')) return;
+        var idx = form.dataset.index;
+        var btn = form.querySelector('button');
+        setLoading(btn, 'Descartando...');
+
+        sendForm(form)
+          .then(function (data) {
+            var card = document.getElementById('card-' + idx);
+            if (data.ok && card) {
+              card.style.transition = 'opacity .2s ease';
+              card.style.opacity = '0';
+              setTimeout(function () { card.remove(); }, 200);
+            } else if (!data.ok) {
+              showInlineError(idx, data.message || 'Não foi possível descartar.');
+              restoreButton(btn);
+            }
+          })
+          .catch(function () {
+            showInlineError(idx, 'Erro de rede ao enviar. Tente novamente.');
+            restoreButton(btn);
+          });
+      });
+    });
+  })();
+</script>
 {% endif %}
 {% endblock %}
