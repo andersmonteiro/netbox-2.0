@@ -1171,6 +1171,33 @@ def _find_ip_by_cidr(nb, cidr):
     return _first_host_match(nb.ipam.ip_addresses.filter(q=host))
 
 
+def _clear_stale_primary_ip_refs(nb, ip_obj):
+    """Se 'ip_obj' está marcado como primary_ip4 (ou primary_ip6) de
+    QUALQUER device -- muito comum em cliente com IPAM pré-existente: o
+    IP já estava associado a uma interface física de verdade e marcado
+    como Primary daquele device antes do Oracle existir -- o NetBox
+    recusa reassociar esse registro a outra interface com 400 "Cannot
+    reassign IP address while it is designated as the primary IP for
+    the parent object". Localiza o(s) device(s) dono(s) via filtro
+    primary_ip4_id/primary_ip6_id (não dá pra confiar só no
+    assigned_object atual do IP pra achar isso) e limpa a referência
+    antes da reassociação -- quem chama (set_primary_ip) recria a
+    referência certa pro device atual logo em seguida. Best-effort: se
+    o filtro falhar por algum motivo, não trava a chamada -- o
+    ip_obj.update() seguinte vai devolver o 400 real do NetBox se ainda
+    houver algum bloqueio."""
+    for field in ("primary_ip4", "primary_ip6"):
+        try:
+            owners = list(nb.dcim.devices.filter(**{f"{field}_id": ip_obj.id}))
+        except Exception:
+            owners = []
+        for owner in owners:
+            try:
+                owner.update({field: None})
+            except Exception:
+                pass
+
+
 def set_primary_ip(nb, device, ip_str):
     """Garante que 'device' tenha 'ip_str' (ex: '10.0.0.1' ou
     '10.0.0.1/32') como Primary IPv4. No modelo do NetBox, um IP só
@@ -1188,7 +1215,11 @@ def set_primary_ip(nb, device, ip_str):
     associado a uma interface de OUTRO device (ex: cadastrado na mão
     antes de existir vínculo de descoberta -- NetBox recusa com "The
     specified IP address is not assigned to this device" se a gente só
-    tentar apontar primary_ip4 pra ele sem mover a associação).
+    tentar apontar primary_ip4 pra ele sem mover a associação), às vezes
+    já marcado como Primary IPv4/6 de algum device (NetBox recusa com
+    "Cannot reassign IP address while it is designated as the primary
+    IP for the parent object" se a gente só tentar mudar a interface
+    dele sem limpar essa referência primeiro).
 
     Em vez de estourar esse 400 cru pro operador, tratamos o que foi
     digitado na tela como fonte de verdade de onde esse IP está de
@@ -1251,6 +1282,18 @@ def set_primary_ip(nb, device, ip_str):
     # ou nenhum) pra nossa interface dedicada -- é o que faz esse IP
     # poder virar Primary IPv4 DESTE device.
     if ip_obj.assigned_object_id != iface.id or ip_obj.assigned_object_type != "dcim.interface":
+        # Se esse IP já é o primary_ip4/6 de ALGUM device (muito comum
+        # em cliente com IPAM pré-existente: o IP já estava associado a
+        # uma interface física de verdade e marcado como Primary IPv4
+        # daquele mesmo device antes do Oracle existir), o NetBox recusa
+        # a reassociação com 400 "Cannot reassign IP address while it is
+        # designated as the primary IP for the parent object" -- precisa
+        # limpar essa referência do lado do device dono primeiro. Não
+        # precisa se preocupar em perder essa referência: se o dono for
+        # o PRÓPRIO device, o device.update({"primary_ip4": ...}) logo
+        # abaixo recria ela certinha; se for outro device, é exatamente
+        # a reassociação que o operador pediu (ver docstring).
+        _clear_stale_primary_ip_refs(nb, ip_obj)
         ip_obj.update({"assigned_object_type": "dcim.interface", "assigned_object_id": iface.id})
 
     device.update({"primary_ip4": ip_obj.id})
