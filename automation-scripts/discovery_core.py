@@ -462,7 +462,13 @@ def collect_ssh(device, username, password, port=None):
                 result.append(f"{addr}/{prefix}" if prefix is not None else addr)
         return result
 
-    data["serial"] = facts.get("serial_number") or None
+    # Alguns drivers NAPALM (a depender do vendor/versão) devolvem
+    # serial_number como número em vez de string -- o NetBox exige
+    # string no campo "serial" e rejeita com 400 se vier int, então
+    # normaliza aqui na origem (str()) já garante o tipo certo pro
+    # JSON salvo em disco e pro que a tela de revisão mostra.
+    _serial_raw = facts.get("serial_number")
+    data["serial"] = str(_serial_raw).strip() if _serial_raw else None
     data["os_version"] = facts.get("os_version") or None
     data["interfaces"] = [
         {
@@ -820,7 +826,14 @@ def apply_device_result(nb, device, data, interface_filter=None):
     """
     changes = []
 
+    # Blindagem contra dado antigo em disco (JSON salvo antes desse fix)
+    # ou qualquer fonte que não devolva string -- o NetBox rejeita com
+    # 400 "Not a valid string" se o serial vier como int/outro tipo.
     serial = data.get("serial")
+    if serial is not None and not isinstance(serial, str):
+        serial = str(serial)
+    if serial:
+        serial = serial.strip()
     if serial and serial != device.serial:
         device.update({"serial": serial})
         changes.append(f"serial={serial}")
