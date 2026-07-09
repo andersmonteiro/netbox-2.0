@@ -763,7 +763,14 @@ def review_apply(filename):
     APPLIED_DIR.mkdir(exist_ok=True)
     path.rename(APPLIED_DIR / path.name)
 
-    msg = f"{device.name}: " + (", ".join(changes) if changes else "sem mudanças")
+    # Mensagem inequívoca de sucesso primeiro (o operador quer confirmar
+    # rápido que foi gravado), com o detalhamento técnico entre
+    # parênteses só como complemento -- antes disso a mensagem começava
+    # direto pelas contagens, o que não deixava claro que era uma
+    # confirmação de sucesso.
+    msg = f"{device.name} enviado com sucesso ao NetBox"
+    if changes:
+        msg += f" ({', '.join(changes)})"
     flash(msg, "success")
     return redirect(url_for("review"))
 

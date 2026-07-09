@@ -816,6 +816,37 @@ def guess_parent_name(name, all_names):
     return None
 
 
+def _sync_interface_ip(nb, nb_if, ip_str, device_id):
+    """Garante que 'ip_str' (CIDR, ex: '10.0.0.1/24') exista no IPAM e
+    esteja associado à interface 'nb_if' -- mesmo padrão de busca já
+    usado em set_primary_ip() (tenta achar por endereço+device antes de
+    achar só por endereço, antes de criar novo, pra não duplicar o
+    mesmo IP como objetos diferentes no NetBox). Se o IP já existir
+    associado a outra interface/device, REASSOCIA pra essa interface --
+    o que a descoberta encontrou agora na porta é tratado como fonte de
+    verdade de onde aquele IP está fisicamente hoje.
+
+    Retorna True se criou ou mudou algo, False se já estava certo."""
+    ip_str = (ip_str or "").strip()
+    if not ip_str:
+        return False
+    if "/" not in ip_str:
+        ip_str = f"{ip_str}/32"
+
+    ip_obj = nb.ipam.ip_addresses.get(address=ip_str, device_id=device_id)
+    if not ip_obj:
+        ip_obj = nb.ipam.ip_addresses.get(address=ip_str)
+    if not ip_obj:
+        nb.ipam.ip_addresses.create(
+            {"address": ip_str, "assigned_object_type": "dcim.interface", "assigned_object_id": nb_if.id}
+        )
+        return True
+    if ip_obj.assigned_object_id != nb_if.id or ip_obj.assigned_object_type != "dcim.interface":
+        ip_obj.update({"assigned_object_type": "dcim.interface", "assigned_object_id": nb_if.id})
+        return True
+    return False
+
+
 def apply_device_result(nb, device, data, interface_filter=None):
     """Aplica um resultado de coleta (dict, mesmo formato salvo em JSON
     pelo CLI) num Device já carregado do pynetbox.
@@ -847,7 +878,7 @@ def apply_device_result(nb, device, data, interface_filter=None):
 
     existing_if = list(nb.dcim.interfaces.filter(device_id=device.id))
     existing_by_norm = {normalize_ifname(i.name): i for i in existing_if}
-    created, updated, matched_norm = 0, 0, 0
+    created, updated, matched_norm, ip_written = 0, 0, 0, 0
     processed_by_name = {}  # nome descoberto -> objeto pynetbox da interface (nova ou já existente)
     pending_parents = []  # [(nome_da_vlan, nome_da_interface_pai)]
 
@@ -907,6 +938,18 @@ def apply_device_result(nb, device, data, interface_filter=None):
         if parent_name:
             pending_parents.append((name, parent_name))
 
+        # IP(s) descoberto(s) na porta (SNMP ipAddrTable e/ou NAPALM
+        # get_interfaces_ip, ver collect_snmp()/collect_ssh()) -- grava
+        # no IPAM e associa a essa interface. Best-effort por IP: um
+        # endereço mal formado ou um conflito específico não pode
+        # derrubar a aplicação do resto do device.
+        for ip_str in iface.get("ip_addresses") or []:
+            try:
+                if _sync_interface_ip(nb, nb_if, ip_str, device.id):
+                    ip_written += 1
+            except Exception:
+                pass
+
     # Segunda passada: só agora todas as interfaces do lote (novas e
     # já existentes) têm um objeto/ID resolvido, então dá pra vincular
     # a VLAN na porta física escolhida na revisão (campo "parent").
@@ -926,6 +969,8 @@ def apply_device_result(nb, device, data, interface_filter=None):
         changes.append(f"{matched_norm} casada(s) por nome normalizado")
     if linked:
         changes.append(f"{linked} VLAN(s) vinculada(s) à interface física")
+    if ip_written:
+        changes.append(f"{ip_written} IP(s) gravado(s)/associado(s) no IPAM")
 
     return changes
 
