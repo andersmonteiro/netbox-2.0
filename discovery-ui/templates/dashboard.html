@@ -87,7 +87,7 @@
         </tbody>
       </table>
     </div>
-    <div class="card-footer d-flex align-items-center">
+    <div class="card-footer d-flex align-items-center py-4">
       <button type="submit" class="btn btn-primary" id="discover-submit-btn">
         <i class="ti ti-radar me-1"></i>Iniciar Descoberta
       </button>
@@ -106,18 +106,33 @@
   .click-edit { cursor: pointer; border-bottom: 1px dashed transparent; }
   .click-edit:hover, .click-edit:focus { border-bottom-color: var(--nbo-accent); outline: none; }
 
+  /* Mais respiro vertical entre as linhas -- table-sm (Tabler/Bootstrap)
+     usa um padding bem apertado por padrão, o que deixava os chips de
+     Método e os badges de Status "grudados" nas linhas vizinhas. */
+  #devices-table > tbody > tr > td { padding-top: .65rem; padding-bottom: .65rem; }
+
   .method-cell { position: relative; }
   .method-view { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; min-height: 1.5rem; border-bottom: 1px dashed transparent; }
   .method-view:hover, .method-view:focus { border-bottom-color: var(--nbo-accent); outline: none; }
   .method-chip { display: inline-flex; align-items: center; gap: 4px; }
   .chip-x { cursor: pointer; opacity: .6; font-size: .9em; line-height: 1; }
   .chip-x:hover { opacity: 1; color: var(--tblr-red); }
+  /* position:fixed (calculado em JS, ver openEditor()) em vez de
+     absolute -- a tabela fica dentro de .table-responsive, que por ter
+     overflow-x:auto acaba virando overflow-y:auto TAMBÉM (regra do CSS:
+     se um eixo não é "visible" o outro deixa de ser "visible" também),
+     e isso cortava/escondia o dropdown quando ele abria perto do fim da
+     tabela. position:fixed não é clipado pelo overflow de um ancestral
+     (só de scroll/containing block da viewport), então escapa desse
+     corte -- ver mesma explicação no comentário do JS. */
   .method-editor {
-    position: absolute; z-index: 20; top: 100%; left: 0; margin-top: 4px;
+    position: fixed; z-index: 1050;
     background: var(--nbo-surface); border: 1px solid var(--nbo-border);
     border-radius: var(--tblr-border-radius); padding: .5rem .75rem;
     box-shadow: 0 4px 16px rgba(0, 0, 0, .4); white-space: nowrap;
   }
+  .method-opt:disabled { cursor: not-allowed; }
+  .method-opt-label-disabled { opacity: .55; cursor: not-allowed; }
 </style>
 <script>
 (function () {
@@ -393,7 +408,43 @@
     function openEditor() {
       viewEl.style.display = 'none';
       editorEl.style.display = '';
-      var first = editorEl.querySelector('.method-opt');
+
+      // position:fixed (ver comentário no CSS .method-editor) --
+      // calculado aqui a partir da posição na TELA do chip clicado, não
+      // do pai (que é o padrão do position:absolute). Sem isso o
+      // dropdown ficava cortado pela .table-responsive quando abria
+      // perto do fim da tabela (overflow-x:auto vira overflow-y:auto
+      // também, então corta/esconde o que "vaza" verticalmente).
+      var rect = viewEl.getBoundingClientRect();
+      editorEl.style.top = (rect.bottom + 4) + 'px';
+      editorEl.style.left = rect.left + 'px';
+
+      // Fabricante sem driver SSH (NAPALM) reconhecido aqui (ex:
+      // MikroTik, a maioria das OLTs) -- ver platform_resolved em
+      // app.py:_build_row(). Method="both" NUNCA fica pronto nesse caso
+      // (mesmo com usuário/senha/community preenchidos), então nem deixa
+      // marcar a opção SSH -- era isso que travava o status em
+      // "incompleto" sem nenhuma explicação.
+      var sshOpt = editorEl.querySelector('.method-opt[value="ssh"]');
+      if (sshOpt) {
+        var label = sshOpt.closest('label');
+        if (tr.dataset.platformResolved === 'false') {
+          sshOpt.checked = false;
+          sshOpt.disabled = true;
+          if (label) {
+            label.classList.add('method-opt-label-disabled');
+            label.title = 'Esse fabricante não tem driver SSH (NAPALM) reconhecido aqui -- use só SNMP.';
+          }
+        } else {
+          sshOpt.disabled = false;
+          if (label) {
+            label.classList.remove('method-opt-label-disabled');
+            label.title = '';
+          }
+        }
+      }
+
+      var first = editorEl.querySelector('.method-opt:not(:disabled)') || editorEl.querySelector('.method-opt');
       if (first) first.focus();
       // Sugestão automática só se ainda não tem nada configurado. O
       // driver NAPALM (Platform) não é mais escolhido aqui -- é resolvido
@@ -403,7 +454,7 @@
         var suggestion = suggestFor(tr.dataset.manufacturer, tr.dataset.deviceTypeModel);
         if (suggestion) {
           var opt = editorEl.querySelector('.method-opt[value="' + suggestion.method + '"]');
-          if (opt) opt.checked = true;
+          if (opt && !opt.disabled) opt.checked = true;
         }
       }
     }

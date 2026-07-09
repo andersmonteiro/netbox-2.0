@@ -353,6 +353,40 @@ def _build_row(d):
     # no NetBox, ela continua valendo (permite override manual); senão,
     # só conta como "pronto" pra SSH/both se o Fabricante for reconhecido.
     platform_resolved = bool(d.platform) or bool(core.resolve_platform_slug(manufacturer, device_type_model))
+
+    # Motivo específico de "incompleto" -- sem isso, o operador só via o
+    # badge vermelho genérico e a caixa de seleção desabilitada, sem
+    # entender o porquê (ex: escolheu method="both" num fabricante tipo
+    # MikroTik, que não tem driver SSH/NAPALM aqui -- ver
+    # _MANUFACTURER_PLATFORM_RULES em discovery_core.py -- então "both"
+    # NUNCA fica pronto pra esse fabricante, mesmo com usuário/senha/
+    # community preenchidos). Usado no title da checkbox e do badge de
+    # status (ver _device_row.html).
+    not_ready_reason = None
+    if not method:
+        not_ready_reason = "Configure o método de descoberta (SSH e/ou SNMP)."
+    elif not d.primary_ip4:
+        not_ready_reason = "Device sem IP de gerência (Primary IPv4) no NetBox."
+    elif method in ("ssh", "both") and not platform_resolved:
+        not_ready_reason = (
+            "Esse fabricante não tem driver SSH (NAPALM) reconhecido aqui "
+            "(ex: MikroTik e a maioria das OLTs não têm) -- \"SSH + SNMP\" "
+            "nunca vai ficar pronto pra esse device. Use só SNMP, ou defina "
+            "a Platform manualmente no NetBox se o driver existir."
+        )
+    elif not has_cred:
+        if method == "both":
+            missing = []
+            if not has_ssh_cred_pair:
+                missing.append("usuário/senha (SSH)")
+            if not has_community:
+                missing.append("community (SNMP)")
+            not_ready_reason = f"Falta {' e '.join(missing)}."
+        elif method == "ssh":
+            not_ready_reason = "Falta usuário/senha (SSH)."
+        elif method == "snmp":
+            not_ready_reason = "Falta a community (SNMP)."
+
     return {
         "id": d.id,
         "name": d.name,
@@ -374,6 +408,8 @@ def _build_row(d):
         # Platform (driver NAPALM) só é obrigatório quando o método
         # envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
         "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or platform_resolved)),
+        "not_ready_reason": not_ready_reason,
+        "platform_resolved": platform_resolved,
         "cf_username": cf.get("discovery_username") or "",
         "cf_ssh_port": cf.get("discovery_ssh_port") or "",
         "cf_snmp_community": cf.get("discovery_snmp_community") or "",

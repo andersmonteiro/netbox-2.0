@@ -14,11 +14,16 @@
   data-region="{{ r.region }}"
   data-manufacturer="{{ r.manufacturer }}"
   data-device-type-model="{{ r.device_type_model }}"
+  {#- Calculado no servidor (ver platform_resolved em app.py:_build_row) --
+      dá pra desabilitar o chip "SSH (NAPALM)" no editor de Método pra
+      fabricantes sem driver reconhecido (ex: MikroTik), em vez de deixar
+      escolher "SSH + SNMP" e o device nunca conseguir ficar "pronto". #}
+  data-platform-resolved="{{ 'true' if r.platform_resolved else 'false' }}"
 >
   <td>
     <input
       type="checkbox" class="form-check-input m-0 dev-cb" name="device_ids" value="{{ r.id }}"
-      {% if not r.ready %}disabled title="Configure o método de descoberta antes (clique nos campos da linha pra editar)"{% endif %}
+      {% if not r.ready %}disabled title="{{ r.not_ready_reason or 'Configure o método de descoberta antes (clique nos campos da linha pra editar)' }}"{% endif %}
     >
   </td>
   <td>
@@ -103,7 +108,7 @@
     {% if r.ready %}
       <span class="badge bg-success-lt text-uppercase"><i class="ti ti-circle-check me-1"></i>pronto</span>
     {% else %}
-      <span class="badge bg-red-lt text-uppercase"><i class="ti ti-circle-x me-1"></i>incompleto</span>
+      <span class="badge bg-red-lt text-uppercase" title="{{ r.not_ready_reason or '' }}"><i class="ti ti-circle-x me-1"></i>incompleto{% if r.not_ready_reason %} <i class="ti ti-info-circle ms-1"></i>{% endif %}</span>
     {% endif %}
   </td>
 </tr>
