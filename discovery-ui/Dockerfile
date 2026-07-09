@@ -26,12 +26,16 @@ COPY automation-scripts/discovery_core.py .
 # __file__. Aplicados por cima dos templates do ntc-templates (pip) toda
 # vez que discovery_core é importado, não só no build da imagem.
 COPY automation-scripts/textfsm_overrides ./textfsm_overrides
-# Script de migração one-off (cifra discovery_password que ainda estiver
-# em texto puro, ver encrypt_secret()/decrypt_secret() em
-# discovery_core.py) -- copiado igual discovery_core.py (achatado direto
-# em /app, não dentro de automation-scripts/) pra rodar como
-# "docker compose exec netbox-oracle python encrypt_existing_secrets.py".
+# Scripts de migração one-off -- copiados igual discovery_core.py
+# (achatados direto em /app, não dentro de automation-scripts/) pra
+# rodar como "docker compose exec netbox-oracle python <script>.py".
+# encrypt_existing_secrets.py: cifra discovery_password que ainda
+# estiver em texto puro (ver encrypt_secret()/decrypt_secret() em
+# discovery_core.py). backfill_connectivity_status.py: testa SSH/SNMP
+# em devices com credencial configurada mas nunca testados (ver
+# test_ssh_connectivity()/test_snmp_connectivity() em discovery_core.py).
 COPY automation-scripts/encrypt_existing_secrets.py .
+COPY automation-scripts/backfill_connectivity_status.py .
 COPY discovery-ui/app.py .
 COPY discovery-ui/templates ./templates
 
