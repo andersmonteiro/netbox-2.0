@@ -3,11 +3,15 @@
 {% block content %}
 <div class="text-center" style="margin-top: 72px; margin-bottom: 40px;">
   <i class="ti ti-radar-2" style="font-size: 2rem; color: var(--nbo-accent);"></i>
-  <h1 style="font-size: 2.5rem; margin-top: .75rem;">Descoberta de rede<br>seu time pode confiar</h1>
+  <h1 style="font-size: 2.5rem; margin-top: .75rem;">Descoberta de rede confiável</h1>
   <div class="text-secondary" style="font-size: 1.05rem;">Entre pra cadastrar devices, rodar descobertas e revisar antes de gravar no NetBox</div>
 </div>
+{# .col-login (utilitário do Tabler pra largura fixa de card de login) não
+   existe/não pegou nessa versão -- o card ficava esticando quase a
+   largura inteira da tela. Breakpoints padrão do Bootstrap resolvem
+   sem depender de classe específica do Tabler. #}
 <div class="row justify-content-center">
-  <div class="col col-login">
+  <div class="col-12 col-sm-9 col-md-7 col-lg-5 col-xl-4">
     <form class="card card-md" method="post" autocomplete="off">
       <div class="card-body">
         <div class="mb-3">

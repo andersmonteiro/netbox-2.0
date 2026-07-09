@@ -124,6 +124,15 @@
     [data-bs-theme=light] .navbar-dark .navbar-nav > .nav-link:hover {
       color: #04070a;
     }
+    /* Grupo API/tema/usuário (.navbar-actions) não usa mais a estrutura
+       .navbar-nav (virou display:table pra centralizar de verdade -- ver
+       comentário mais abaixo), então a regra acima não pega mais esses
+       links. Cor direta aqui, nos dois temas -- sem depender de herança
+       (nada de text-reset), assim não some no modo claro. */
+    .navbar-actions .nav-link { color: rgba(255, 255, 255, .85); }
+    .navbar-actions .nav-link:hover { color: #fff; }
+    [data-bs-theme=light] .navbar-actions .nav-link { color: rgba(4, 7, 10, .8); }
+    [data-bs-theme=light] .navbar-actions .nav-link:hover { color: #04070a; }
 
     body {
       background: var(--nbo-bg);
@@ -228,7 +237,7 @@
       <div class="container-fluid px-4 d-flex align-items-center">
         <a href="{{ url_for('dashboard') if session.get('logged_in') else url_for('login') }}" class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
           <i class="ti ti-radar-2 fs-2 me-2" style="color: var(--nbo-accent);"></i>
-          <span class="fw-bold">NetBox<span class="accent">Oracle</span></span>
+          <span class="fw-bold">netbox<span class="accent">oracle</span></span>
         </a>
         {% if session.get('logged_in') %}
         <!-- Menu (Devices/Revisão) logo depois da logo, mesma linha --
@@ -270,7 +279,7 @@
             </a>
           </div>
           <div class="nav-item dropdown" style="display:table-cell !important; vertical-align:middle !important;">
-            <a href="#" class="nav-link text-reset" data-bs-toggle="dropdown"
+            <a href="#" class="nav-link" data-bs-toggle="dropdown"
                style="display:inline-block !important; vertical-align:middle !important; line-height:1 !important;">
               <span class="fw-medium" style="vertical-align:middle;">{{ session.get('username') }}</span>
               <i class="ti ti-chevron-down ms-1 text-secondary" style="font-size: .8rem; vertical-align:middle;"></i>
@@ -300,9 +309,9 @@
       </div>
       <footer class="footer footer-transparent d-print-none">
         <div class="container-xl">
-          <div class="row text-center align-items-center flex-row-reverse">
+          <div class="row justify-content-center text-center align-items-center">
             <div class="col-12 col-lg-auto mt-lg-0">
-              <ul class="list-inline list-inline-dots mb-0 text-secondary">
+              <ul class="list-inline list-inline-dots mb-0 text-secondary" style="font-size: .75rem;">
                 <li class="list-inline-item">Desenvolvido por Anderson Monteiro</li>
                 <li class="list-inline-item">Todos os direitos reservados &copy; 2026</li>
               </ul>
