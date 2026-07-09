@@ -2,9 +2,17 @@
 {% block title %}Login · NetBox Oracle{% endblock %}
 {% block content %}
 <div class="text-center" style="margin-top: 72px; margin-bottom: 40px;">
-  <i class="ti ti-radar-2" style="font-size: 2rem; color: var(--nbo-accent);"></i>
-  <h1 style="font-size: 2.5rem; margin-top: .75rem;">Descoberta de rede confiável</h1>
-  <div class="text-secondary" style="font-size: 1.05rem;">Entre pra cadastrar devices, rodar descobertas e revisar antes de gravar no NetBox</div>
+  <svg viewBox="-50 -50 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg"
+       fill="none" stroke="var(--nbo-accent)" stroke-linecap="round">
+    <path d="M -6,-42 A 42,42 0 0 1 32,-28" stroke-width="13"/>
+    <path d="M 32,-28 A 42,42 0 0 1 42,6" stroke-width="9"/>
+    <path d="M 42,6 A 42,42 0 0 1 22,36" stroke-width="5"/>
+    <path d="M 6,42 A 42,42 0 0 1 -32,28" stroke-width="13"/>
+    <path d="M -32,28 A 42,42 0 0 1 -42,-6" stroke-width="9"/>
+    <path d="M -42,-6 A 42,42 0 0 1 -22,-36" stroke-width="5"/>
+  </svg>
+  <h1 style="font-size: 2.5rem; margin-top: .75rem;">NetBox <span class="accent">Oracle</span></h1>
+  <div class="text-secondary" style="font-size: 1.05rem;">Automação de inventário via SSH e SNMP. Coleta de dados e preenchimento automático via API para uma infraestrutura mais ágil.</div>
 </div>
 {# .col-login (utilitário do Tabler pra largura fixa de card de login) não
    existe/não pegou nessa versão -- o card ficava esticando quase a

@@ -236,7 +236,18 @@
            pro conteúdo (ver container_class nesses templates). -->
       <div class="container-fluid px-4 d-flex align-items-center">
         <a href="{{ url_for('dashboard') if session.get('logged_in') else url_for('login') }}" class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
-          <i class="ti ti-radar-2 fs-2 me-2" style="color: var(--nbo-accent);"></i>
+          {# Logo vetorizado à mão a partir da imagem enviada pelo cliente
+             (vórtice de dois braços, cada um afinando até uma ponta) --
+             substitui o ícone genérico ti-radar-2. #}
+          <svg viewBox="-50 -50 100 100" width="26" height="26" xmlns="http://www.w3.org/2000/svg"
+               fill="none" stroke="var(--nbo-accent)" stroke-linecap="round" class="me-2" style="flex-shrink:0;">
+            <path d="M -6,-42 A 42,42 0 0 1 32,-28" stroke-width="13"/>
+            <path d="M 32,-28 A 42,42 0 0 1 42,6" stroke-width="9"/>
+            <path d="M 42,6 A 42,42 0 0 1 22,36" stroke-width="5"/>
+            <path d="M 6,42 A 42,42 0 0 1 -32,28" stroke-width="13"/>
+            <path d="M -32,28 A 42,42 0 0 1 -42,-6" stroke-width="9"/>
+            <path d="M -42,-6 A 42,42 0 0 1 -22,-36" stroke-width="5"/>
+          </svg>
           <span class="fw-bold">netbox<span class="accent">oracle</span></span>
         </a>
         {% if session.get('logged_in') %}
