@@ -1201,6 +1201,22 @@ def set_primary_ip(nb, device, ip_str):
     if "/" not in ip_str:
         ip_str = f"{ip_str}/32"
 
+    # Valida ANTES de mandar pro NetBox -- um endereço mal formado (ex:
+    # '456.176.1', faltando um ponto) não é rejeitado de forma limpa por
+    # todo endpoint/versão do NetBox: já vimos isso virar um 500 cru
+    # "Internal Server Error" (com traceback tipo KeyError) em vez de um
+    # 400 de validação normal, porque o parsing de endereço do lado do
+    # NetBox nem sempre trata string totalmente inválida com uma exceção
+    # tratada. Falhar aqui, do nosso lado, com uma mensagem clara em
+    # português, evita expor esse erro cru pro operador.
+    try:
+        ipaddress.ip_interface(ip_str)
+    except ValueError:
+        raise RuntimeError(
+            f"'{ip_str.split('/')[0]}' não é um endereço IP válido -- confira "
+            f"se não falta ou sobra algum ponto/dígito."
+        )
+
     iface = nb.dcim.interfaces.get(device_id=device.id, name=MGMT_INTERFACE_NAME)
     if not iface:
         iface = nb.dcim.interfaces.create(
