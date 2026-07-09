@@ -432,7 +432,15 @@ _MANUFACTURER_SSH_RULES = [
     (re.compile(r"juniper", re.I), "juniper_junos"),
     (re.compile(r"arista", re.I), "arista_eos"),
     (re.compile(r"palo\s*alto", re.I), "paloalto_panos"),
-    (re.compile(r"huawei", re.I), "huawei"),
+    # "huawei_vrp" (o sistema operacional VRP dos roteadores/switches
+    # Huawei), NÃO o device_type genérico "huawei" do Netmiko -- os
+    # templates TextFSM do ntc-templates pra Huawei só existem com o
+    # prefixo "huawei_vrp_*" (ex: huawei_vrp_display_interface.textfsm).
+    # Usar "huawei" aqui faz o Netmiko conectar normalmente, mas o
+    # send_command(..., use_textfsm=True) nunca acha template nenhum
+    # (confirmado contra device real do cliente: 'display interface'/
+    # 'display version' voltavam sem dado estruturado nenhum).
+    (re.compile(r"huawei", re.I), "huawei_vrp"),
 ]
 _OLT_PATTERN = re.compile(r"\bolt\b|ma5\d{3}", re.I)
 
@@ -447,7 +455,7 @@ _SSH_COMMANDS = {
     "arista_eos": {"interfaces": "show interfaces", "version": "show version"},
     "juniper_junos": {"interfaces": "show interfaces terse", "version": "show version"},
     "paloalto_panos": {"interfaces": "show interface all", "version": "show system info"},
-    "huawei": {"interfaces": "display interface", "version": "display version"},
+    "huawei_vrp": {"interfaces": "display interface", "version": "display version"},
 }
 
 
@@ -461,7 +469,7 @@ def resolve_ssh_device_type(manufacturer, device_type_model=None):
     manufacturer = manufacturer or ""
     for pattern, device_type in _MANUFACTURER_SSH_RULES:
         if pattern.search(manufacturer):
-            if device_type == "huawei" and _OLT_PATTERN.search(device_type_model or ""):
+            if device_type == "huawei_vrp" and _OLT_PATTERN.search(device_type_model or ""):
                 return None
             return device_type
     return None
@@ -1410,7 +1418,6 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
             cf["discovery_username"] = discovery_username
         if discovery_password is not None:
             cf["discovery_password"] = encrypt_secret(discovery_password)
-        if discovery_ssh_port is not None:
             cf["discovery_ssh_port"] = discovery_ssh_port
     if method in ("snmp", "both"):
         if discovery_snmp_community is not None:

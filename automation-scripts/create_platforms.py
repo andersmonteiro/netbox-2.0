@@ -42,7 +42,7 @@ NETBOX_TOKEN = os.environ.get("NETBOX_TOKEN")
 # o catálogo de device types deste projeto é majoritariamente Huawei
 # (NE8000 etc.).
 PLATFORMS = {
-    "huawei": "Huawei VRP",
+    "huawei_vrp": "Huawei VRP",
     "cisco_ios": "Cisco IOS / IOS-XE",
     "cisco_xr": "Cisco IOS-XR",
     "cisco_nxos": "Cisco NX-OS (SSH)",

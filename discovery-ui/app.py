@@ -495,7 +495,7 @@ def device_new():
             "necessário se quiser FORÇAR manualmente como conectar via SSH "
             "num device específico (o normal é resolver sozinho pelo "
             "Fabricante). Crie em NetBox > Devices > Platforms > Add, com o "
-            "Slug igual a um device_type válido do Netmiko (ex: 'huawei', "
+            "Slug igual a um device_type válido do Netmiko (ex: 'huawei_vrp', "
             "'cisco_ios', 'juniper_junos').",
             "error",
         )
@@ -531,7 +531,7 @@ def device_edit(device_id):
             "necessário se quiser FORÇAR manualmente como conectar via SSH "
             "num device específico (o normal é resolver sozinho pelo "
             "Fabricante). Crie em NetBox > Devices > Platforms > Add, com o "
-            "Slug igual a um device_type válido do Netmiko (ex: 'huawei', "
+            "Slug igual a um device_type válido do Netmiko (ex: 'huawei_vrp', "
             "'cisco_ios', 'juniper_junos').",
             "error",
         )
