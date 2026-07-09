@@ -1112,6 +1112,30 @@ def apply_device_result(nb, device, data, interface_filter=None):
 
 MGMT_INTERFACE_NAME = "mgmt-discovery"
 
+# Mensagem que o NetBox devolve quando "Enforce unique space" (global,
+# em Settings > IPAM) está ligado e o endereço já existe -- comum em
+# clientes que já tinham o IPAM preenchido antes de instalar o Oracle.
+# Ex: "Duplicate IP address found in global table: 45.6.176.34/30".
+_DUPLICATE_IP_RE = re.compile(r"Duplicate IP address found in \S+ table: (\S+)")
+
+
+def _extract_duplicate_cidr(exc):
+    """Extrai o endereço/prefixo do IP conflitante da mensagem de erro
+    de duplicidade do NetBox, pra dar pra buscar e reaproveitar o
+    registro que já existe em vez de só repassar o 400 cru pro
+    operador (ver set_primary_ip abaixo)."""
+    text = str(getattr(exc, "error", "") or "") or str(exc)
+    match = _DUPLICATE_IP_RE.search(text)
+    return match.group(1) if match else None
+
+
+def _ip_owner_device(ip_obj):
+    """Device dono de ip_obj, se ele estiver associado a uma interface
+    de device (dcim.interface) -- ou None se estiver livre, associado a
+    outra coisa (ex: interface de VM), ou não der pra determinar."""
+    assigned = getattr(ip_obj, "assigned_object", None)
+    return getattr(assigned, "device", None) if assigned else None
+
 
 def set_primary_ip(nb, device, ip_str):
     """Garante que 'device' tenha 'ip_str' (ex: '10.0.0.1' ou
@@ -1120,6 +1144,16 @@ def set_primary_ip(nb, device, ip_str):
     device -- por isso criamos (ou reaproveitamos) uma interface
     dedicada MGMT_INTERFACE_NAME pra isso, em vez de exigir que o
     operador entenda esse detalhe do modelo de dados.
+
+    Clientes que já têm o IPAM preenchido antes de instalar o Oracle
+    costumam ter o mesmo host já cadastrado com outro prefixo (ex:
+    '45.6.176.34/30', parte de um bloco documentado antes) -- nosso
+    lookup abaixo só acha por string EXATA (endereço+prefixo), então
+    não bate com a tentativa em '/32' e a criação esbarra na validação
+    "Enforce unique space" do NetBox (endereço duplicado por host,
+    independente do prefixo). Em vez de estourar esse 400 cru pro
+    operador, capturamos o erro, extraímos o endereço real do texto da
+    mensagem do NetBox e reaproveitamos o registro existente.
     """
     ip_str = ip_str.strip()
     if "/" not in ip_str:
@@ -1138,9 +1172,26 @@ def set_primary_ip(nb, device, ip_str):
         # endereço puro antes de criar um novo, pra não duplicar.
         ip_obj = nb.ipam.ip_addresses.get(address=ip_str)
     if not ip_obj:
-        ip_obj = nb.ipam.ip_addresses.create(
-            {"address": ip_str, "assigned_object_type": "dcim.interface", "assigned_object_id": iface.id}
-        )
+        try:
+            ip_obj = nb.ipam.ip_addresses.create(
+                {"address": ip_str, "assigned_object_type": "dcim.interface", "assigned_object_id": iface.id}
+            )
+        except pynetbox.RequestError as exc:
+            existing_cidr = _extract_duplicate_cidr(exc)
+            if not existing_cidr:
+                raise
+            ip_obj = nb.ipam.ip_addresses.get(address=existing_cidr)
+            if not ip_obj:
+                raise
+            owner = _ip_owner_device(ip_obj)
+            if owner and owner.id != device.id:
+                raise RuntimeError(
+                    f"O IP {existing_cidr} já está cadastrado no NetBox associado a "
+                    f"outro device ('{owner.name}'). Ajuste manualmente no NetBox "
+                    "(IPAM > IP Addresses) antes de usar esse endereço aqui."
+                ) from exc
+            if not ip_obj.assigned_object_id:
+                ip_obj.update({"assigned_object_type": "dcim.interface", "assigned_object_id": iface.id})
     elif not ip_obj.assigned_object_id:
         ip_obj.update({"assigned_object_type": "dcim.interface", "assigned_object_id": iface.id})
 
