@@ -173,10 +173,10 @@
       if (!btn) return;
       btn.dataset.originalHtml = btn.innerHTML;
       btn.disabled = true;
-      btn.classList.add('btn-loading');
+      btn.classList.add('nbo-btn-loading');
       // Tira o foco antes de desabilitar -- o anel de foco em teal do
       // Bootstrap (--tblr-primary) fica "grudado" visualmente junto com
-      // o cinza do disabled, senão (ver CSS .btn-loading em base.html).
+      // o cinza do disabled, senão (ver CSS .nbo-btn-loading em base.html).
       btn.blur();
       btn.innerHTML = NBO_SPINNER_SVG + loadingText;
     }
@@ -184,7 +184,7 @@
     function restoreButton(btn) {
       if (!btn) return;
       btn.disabled = false;
-      btn.classList.remove('btn-loading');
+      btn.classList.remove('nbo-btn-loading');
       if (btn.dataset.originalHtml) btn.innerHTML = btn.dataset.originalHtml;
     }
 

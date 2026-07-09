@@ -237,8 +237,19 @@
        "Iniciar Descoberta" da dashboard. display:inline-flex + gap aqui
        (em vez de contar só com o padrão do Tabler) garante que a
        logo giratória (.nbo-spin-logo, ver abaixo) fique DO LADO do texto,
-       nunca por cima -- era isso que causava a sobreposição antes. */
-    .btn-loading, .btn-loading:hover, .btn-loading:focus, .btn-loading:active, .btn-loading:disabled {
+       nunca por cima -- era isso que causava a sobreposição antes.
+
+       Nome da classe prefixado "nbo-" DE PROPÓSITO (não ".btn-loading"
+       puro) -- o Tabler/Bootstrap já usa esse nome genérico pra um
+       padrão de spinner PRÓPRIO deles (um "::after" centralizado via
+       position:absolute, independente do texto), que ficava competindo
+       com o nosso e desenhando um anel extra grudado no MEIO do botão
+       por cima do texto -- exatamente o "círculo no meio" reportado,
+       mesmo depois de aumentar/ajustar o SVG, porque o círculo extra
+       nem era o nosso SVG. O ::before/::after abaixo é reforço (belt-
+       and-suspenders) caso algum outro seletor ainda tente desenhar
+       algo ali. */
+    .nbo-btn-loading, .nbo-btn-loading:hover, .nbo-btn-loading:focus, .nbo-btn-loading:active, .nbo-btn-loading:disabled {
       background: #3a3f42 !important;
       border-color: #3a3f42 !important;
       color: rgba(255, 255, 255, .75) !important;
@@ -251,11 +262,12 @@
       white-space: nowrap !important;
       gap: .4rem;
     }
-    [data-bs-theme=light] .btn-loading,
-    [data-bs-theme=light] .btn-loading:hover,
-    [data-bs-theme=light] .btn-loading:focus,
-    [data-bs-theme=light] .btn-loading:active,
-    [data-bs-theme=light] .btn-loading:disabled {
+    .nbo-btn-loading::before, .nbo-btn-loading::after { content: none !important; display: none !important; }
+    [data-bs-theme=light] .nbo-btn-loading,
+    [data-bs-theme=light] .nbo-btn-loading:hover,
+    [data-bs-theme=light] .nbo-btn-loading:focus,
+    [data-bs-theme=light] .nbo-btn-loading:active,
+    [data-bs-theme=light] .nbo-btn-loading:disabled {
       background: #c8cbcd !important;
       border-color: #c8cbcd !important;
       color: rgba(4, 7, 10, .6) !important;
