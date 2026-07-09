@@ -1129,31 +1129,31 @@ def _extract_duplicate_cidr(exc):
     return match.group(1) if match else None
 
 
-def _ip_owner_device(ip_obj):
-    """Device dono de ip_obj, se ele estiver associado a uma interface
-    de device (dcim.interface) -- ou None se estiver livre, associado a
-    outra coisa (ex: interface de VM), ou não der pra determinar."""
-    assigned = getattr(ip_obj, "assigned_object", None)
-    return getattr(assigned, "device", None) if assigned else None
-
-
 def set_primary_ip(nb, device, ip_str):
     """Garante que 'device' tenha 'ip_str' (ex: '10.0.0.1' ou
     '10.0.0.1/32') como Primary IPv4. No modelo do NetBox, um IP só
-    pode virar Primary IPv4 se já estiver associado a uma Interface do
-    device -- por isso criamos (ou reaproveitamos) uma interface
+    pode virar Primary IPv4 se já estiver associado a uma Interface DO
+    PRÓPRIO device -- por isso criamos (ou reaproveitamos) uma interface
     dedicada MGMT_INTERFACE_NAME pra isso, em vez de exigir que o
     operador entenda esse detalhe do modelo de dados.
 
     Clientes que já têm o IPAM preenchido antes de instalar o Oracle
-    costumam ter o mesmo host já cadastrado com outro prefixo (ex:
-    '45.6.176.34/30', parte de um bloco documentado antes) -- nosso
-    lookup abaixo só acha por string EXATA (endereço+prefixo), então
-    não bate com a tentativa em '/32' e a criação esbarra na validação
-    "Enforce unique space" do NetBox (endereço duplicado por host,
-    independente do prefixo). Em vez de estourar esse 400 cru pro
-    operador, capturamos o erro, extraímos o endereço real do texto da
-    mensagem do NetBox e reaproveitamos o registro existente.
+    costumam ter esse host já cadastrado de algum jeito -- às vezes com
+    outro prefixo (ex: '45.6.176.34/30', parte de um bloco documentado
+    antes: nosso lookup abaixo só acha por string EXATA (endereço+
+    prefixo), então não bate com a tentativa em '/32' e a criação
+    esbarra na validação "Enforce unique space" do NetBox), às vezes já
+    associado a uma interface de OUTRO device (ex: cadastrado na mão
+    antes de existir vínculo de descoberta -- NetBox recusa com "The
+    specified IP address is not assigned to this device" se a gente só
+    tentar apontar primary_ip4 pra ele sem mover a associação).
+
+    Em vez de estourar esse 400 cru pro operador, tratamos o que foi
+    digitado na tela como fonte de verdade de onde esse IP está de
+    verdade hoje -- mesmo padrão já usado em _sync_interface_ip() pra
+    IP de interface descoberta automaticamente -- e REASSOCIAMOS o
+    registro existente (de qualquer device/interface que estiver) pra
+    cá, em vez de bloquear pedindo ajuste manual no NetBox.
     """
     ip_str = ip_str.strip()
     if "/" not in ip_str:
@@ -1168,8 +1168,9 @@ def set_primary_ip(nb, device, ip_str):
     ip_obj = nb.ipam.ip_addresses.get(address=ip_str, device_id=device.id)
     if not ip_obj:
         # Pode já existir um IP com esse endereço em outro objeto (ex:
-        # criado antes sem interface associada) -- tenta achar por
-        # endereço puro antes de criar um novo, pra não duplicar.
+        # criado antes sem interface associada, ou associado a outro
+        # device) -- tenta achar por endereço puro antes de criar um
+        # novo, pra não duplicar.
         ip_obj = nb.ipam.ip_addresses.get(address=ip_str)
     if not ip_obj:
         try:
@@ -1177,22 +1178,20 @@ def set_primary_ip(nb, device, ip_str):
                 {"address": ip_str, "assigned_object_type": "dcim.interface", "assigned_object_id": iface.id}
             )
         except pynetbox.RequestError as exc:
+            # Endereço já existe com outro prefixo (ver docstring) --
+            # extrai o CIDR real da mensagem de erro do NetBox e busca
+            # o registro existente pra reaproveitar.
             existing_cidr = _extract_duplicate_cidr(exc)
             if not existing_cidr:
                 raise
             ip_obj = nb.ipam.ip_addresses.get(address=existing_cidr)
             if not ip_obj:
                 raise
-            owner = _ip_owner_device(ip_obj)
-            if owner and owner.id != device.id:
-                raise RuntimeError(
-                    f"O IP {existing_cidr} já está cadastrado no NetBox associado a "
-                    f"outro device ('{owner.name}'). Ajuste manualmente no NetBox "
-                    "(IPAM > IP Addresses) antes de usar esse endereço aqui."
-                ) from exc
-            if not ip_obj.assigned_object_id:
-                ip_obj.update({"assigned_object_type": "dcim.interface", "assigned_object_id": iface.id})
-    elif not ip_obj.assigned_object_id:
+
+    # Reassocia o registro (de qualquer device/interface que estiver,
+    # ou nenhum) pra nossa interface dedicada -- é o que faz esse IP
+    # poder virar Primary IPv4 DESTE device.
+    if ip_obj.assigned_object_id != iface.id or ip_obj.assigned_object_type != "dcim.interface":
         ip_obj.update({"assigned_object_type": "dcim.interface", "assigned_object_id": iface.id})
 
     device.update({"primary_ip4": ip_obj.id})
