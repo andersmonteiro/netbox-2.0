@@ -10,3 +10,6 @@ napalm>=5.0
 napalm-huawei-vrp>=1.0
 netmiko>=4.3
 python-dotenv>=1.0
+# Cifra a senha de descoberta (discovery_password) antes de gravar no
+# NetBox -- ver encrypt_secret()/decrypt_secret() em discovery_core.py.
+cryptography>=42

@@ -13,6 +13,8 @@ Mantido separado do CLI de propósito, pra não duplicar a lógica de
 coleta/aplicação entre os dois front-ends.
 """
 
+import base64
+import hashlib
 import ipaddress
 import os
 import re
@@ -20,6 +22,71 @@ import subprocess
 import sys
 
 import pynetbox
+
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except ImportError:  # pragma: no cover -- ambiente sem 'cryptography' instalado
+    Fernet = None
+    InvalidToken = Exception
+
+# --------------------------------------------------------------------
+# Cifra da senha de descoberta (discovery_password) antes de gravar no
+# NetBox -- sem isso, ela ficava salva em TEXTO PURO num custom field,
+# visível pra qualquer usuário com acesso de leitura ao device no NetBox
+# (UI, API ou banco). Chave derivada do FLASK_SECRET_KEY/
+# DISCOVERY_UI_SECRET_KEY que já existe (gerado aleatoriamente por
+# instalação pelo bootstrap.sh) -- de propósito NÃO criamos uma variável
+# de ambiente nova só pra isso, pra não exigir mais um passo manual de
+# configuração/redeploy. SHA-256 só normaliza esse segredo (que pode ter
+# qualquer tamanho) pro tamanho exato de 32 bytes que o Fernet exige.
+# --------------------------------------------------------------------
+_SECRET_PREFIX = "enc:v1:"
+
+
+def _fernet():
+    if Fernet is None:
+        return None
+    raw = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("DISCOVERY_UI_SECRET_KEY")
+    if not raw:
+        return None
+    key = base64.urlsafe_b64encode(hashlib.sha256(raw.encode("utf-8")).digest())
+    return Fernet(key)
+
+
+def encrypt_secret(value):
+    """Cifra 'value' (ex: senha SSH) antes de gravar num custom field do
+    NetBox. Marca o resultado com um prefixo de versão (_SECRET_PREFIX)
+    pra distinguir de valor legado salvo em texto puro (ver
+    decrypt_secret) e permitir trocar o esquema de cifra no futuro sem
+    quebrar dado antigo. Best-effort: se não tiver como cifrar
+    (cryptography não instalado, ou sem chave configurada), devolve
+    'value' sem alteração em vez de travar o salvamento -- pior caso é
+    voltar ao comportamento antigo (texto puro), não perder o dado."""
+    if not value:
+        return value
+    f = _fernet()
+    if f is None:
+        return value
+    return _SECRET_PREFIX + f.encrypt(value.encode("utf-8")).decode("ascii")
+
+
+def decrypt_secret(value):
+    """Decifra um valor gravado por encrypt_secret(). Valor SEM o
+    prefixo é tratado como texto puro legado (salvo antes dessa mudança,
+    ou por uma instalação sem 'cryptography'/chave) e devolvido como
+    está -- continua funcionando pra conectar via SSH, só não fica
+    protegido até o operador salvar de novo ou rodar
+    automation-scripts/encrypt_existing_secrets.py (migração em massa)."""
+    if not value or not isinstance(value, str) or not value.startswith(_SECRET_PREFIX):
+        return value
+    f = _fernet()
+    if f is None:
+        return value
+    try:
+        return f.decrypt(value[len(_SECRET_PREFIX):].encode("ascii")).decode("utf-8")
+    except InvalidToken:
+        return value
+
 
 # --------------------------------------------------------------------
 # Cliente NetBox
@@ -566,7 +633,18 @@ def collect_both(device, credentials, snmp_timeout=5, snmp_retries=1):
 def collect_device(device, method, credentials, snmp_timeout=5, snmp_retries=1):
     """Ponto de entrada único: despacha pro coletor certo a partir do
     'discovery_method' + dict de credenciais (mesmas chaves dos custom
-    fields: username/password ou community)."""
+    fields: username/password ou community).
+
+    Ponto único também pra decifrar discovery_password (ver
+    encrypt_secret/decrypt_secret) -- tanto o CLI (discovery_netbox.py)
+    quanto a interface web (discovery-ui/app.py) chamam só essa função
+    pra coletar, nunca collect_ssh()/collect_snmp()/collect_both()
+    direto, então decifrar aqui (numa CÓPIA do dict, não mexe no
+    original) cobre os dois front-ends sem duplicar a chamada em cada
+    um."""
+    credentials = dict(credentials or {})
+    if credentials.get("discovery_password"):
+        credentials["discovery_password"] = decrypt_secret(credentials["discovery_password"])
     if method == "ssh":
         username = credentials.get("discovery_username")
         password = credentials.get("discovery_password")
@@ -1082,14 +1160,19 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
     operador não preencher nada aqui num device SNMP, esses campos
     continuam vazios e a coleta segue 100% via SNMP, sem essa checagem
     extra). discovery_snmp_community é gravado pra method="snmp" e
-    method="both"."""
+    method="both".
+
+    discovery_password é cifrado (ver encrypt_secret) antes de gravar --
+    o NetBox guarda só o texto cifrado no custom field, nunca a senha em
+    claro. decrypt_secret() é chamado do outro lado, no único lugar que
+    de fato usa a senha pra conectar (collect_device())."""
     cf = dict(device.custom_fields or {})
     cf["discovery_method"] = method
     if method in ("ssh", "snmp", "both"):
         if discovery_username is not None:
             cf["discovery_username"] = discovery_username
         if discovery_password is not None:
-            cf["discovery_password"] = discovery_password
+            cf["discovery_password"] = encrypt_secret(discovery_password)
         if discovery_ssh_port is not None:
             cf["discovery_ssh_port"] = discovery_ssh_port
     if method in ("snmp", "both"):
