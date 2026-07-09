@@ -98,13 +98,6 @@ aceita a gerada; "n" pede pra digitar uma senha sua (digitação oculta,
 como em `sudo`). Funciona normalmente mesmo rodando via `curl | bash`.
 Ela aparece de novo no resumo final da instalação.
 
-**Senha do superusuário**: se você não tiver exportado
-`SUPERUSER_PASSWORD` antes, o script gera uma senha aleatória, mostra
-ela na tela e pergunta "Usar essa senha? (Y/n)". Dar Enter (ou "y")
-aceita a gerada; "n" pede pra digitar uma senha sua (digitação oculta,
-como em `sudo`). Funciona normalmente mesmo rodando via `curl | bash`.
-Ela aparece de novo no resumo final da instalação.
-
 **Usando sempre a mesma senha/token (ex: padrão da empresa)**: por
 padrão a senha e os tokens são gerados aleatoriamente a cada instalação
 — o repositório público nunca tem um valor fixo real. Se você quiser
@@ -117,11 +110,20 @@ guardar o comando, nunca no git):
 export SUPERUSER_PASSWORD='sua-senha-de-verdade'
 export SUPERUSER_API_TOKEN='seu-token-fixo-de-40-hex'   # ex: openssl rand -hex 20
 export SUPERUSER_API_KEY='sua-key-fixa-de-32-hex'       # ex: openssl rand -hex 16
+export DISCOVERY_UI_PASSWORD='sua-senha-fixa-do-oracle' # opcional, ver aviso abaixo
 curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 ```
 
 Se alguma dessas variáveis não for definida, o bootstrap continua
-gerando aleatoriamente só a que faltar.
+gerando aleatoriamente só a que faltar. `DISCOVERY_UI_PASSWORD` fixa a
+senha de login do NetBox Oracle (a interface de descoberta) e funciona
+igual nos dois modos de instalação (completa e só-oracle, seção 3).
+
+> **Senha com caracteres especiais (`!`, por exemplo)**: se a senha
+> tiver `!`, digitar o `export` direto no terminal dispara expansão de
+> histórico do bash e quebra o comando (mesmo dentro de aspas simples).
+> Rode `set +H` antes de colar o bloco acima pra desligar isso na sessão
+> atual.
 
 Esse comando só funciona porque o repositório é **público** (sem
 segredo nenhum nele — ver seção 7); a VM do cliente não precisa de
@@ -437,11 +439,19 @@ apontando pra ele via API — sem subir NetBox, Postgres, Redis nem nada
 do resto da stack, e **sem mexer no que já está em produção**. Sobe só
 o container `netbox-oracle`.
 
-É o mesmo `bootstrap.sh` da seção 1, só que no modo "só discovery-ui" —
-rodando com terminal interativo ele pergunta na hora (opção 2). Pra
-pular a pergunta (obrigatório em cron/CI, sem terminal, ou só pra não
-ter que escolher), exporte as duas variáveis abaixo e ele detecta o
-modo sozinho:
+**Comando padrão (recomendado)** — é o mesmo `bootstrap.sh` da seção 1,
+um único instalador pros dois cenários. Rodando com terminal
+interativo (qualquer SSH normal), ele pergunta "1) Completa / 2) Só o
+NetBox Oracle" na hora — escolha 2, e em seguida ele pede a URL e o
+token do NetBox do cliente:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
+```
+
+**Pulando a pergunta** (obrigatório em cron/CI sem terminal, ou só pra
+não precisar escolher): exporte `NETBOX_URL`/`NETBOX_TOKEN` antes — ele
+detecta o modo sozinho e nem chega a perguntar:
 
 ```bash
 export NETBOX_URL='http://IP_OU_HOST_DO_NETBOX_DO_CLIENTE:8000'
@@ -449,19 +459,37 @@ export NETBOX_TOKEN='token-de-api-com-permissao-de-escrita-em-dcim-ipam'
 curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 ```
 
-Atalho equivalente (mesma coisa, já fixo no modo certo — útil se você
-não quiser depender da detecção automática):
+`install-discovery-ui.sh` é só um atalho de 3 linhas que chama o
+`bootstrap.sh` acima já fixo no modo discovery-only (equivale a
+exportar `INSTALL_MODE=discovery-only`) — mesmo resultado, mas pula a
+pergunta "1 ou 2" de propósito. Prefira o `bootstrap.sh` puro como
+padrão; use o atalho só se realmente quiser garantir esse modo sem
+depender da detecção automática.
+
+**Senha fixa da tela do NetBox Oracle**: por padrão a senha de login é
+gerada aleatória a cada instalação. Pra usar sempre a mesma (ex: padrão
+da empresa), exporte `DISCOVERY_UI_PASSWORD` junto com as duas de cima
+— mesmo aviso do `set +H` da seção 1 se ela tiver `!`:
 
 ```bash
 export NETBOX_URL='http://IP_OU_HOST_DO_NETBOX_DO_CLIENTE:8000'
 export NETBOX_TOKEN='token-de-api-com-permissao-de-escrita-em-dcim-ipam'
-curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/install-discovery-ui.sh | bash
+export DISCOVERY_UI_PASSWORD='sua-senha-fixa'
+curl -fsSL https://raw.githubusercontent.com/andersmonteiro/netbox-2.0/main/bootstrap.sh | bash
 ```
 
-O resto (login/senha da tela, chave de sessão) é gerado automaticamente
-— aparece no resumo final. Detalhes de uso da interface (dashboard,
+O resto (usuário da tela, chave de sessão) é gerado automaticamente —
+aparece no resumo final. Detalhes de uso da interface (dashboard,
 cadastro de device, revisão/aprovação) estão na seção 2.4, é a mesma
 tela.
+
+**Cliente com IPAM já preenchido**: se o NetBox do cliente já tem IPs
+cadastrados de antes (comum — endereço de gerência já documentado com
+outro prefixo, ex: um `/30` de um link), o Oracle detecta o conflito
+automaticamente e reaproveita o registro existente em vez de tentar
+criar um duplicado. Só aparece um erro se esse IP já estiver associado
+a **outro device** no NetBox — nesse caso, ajuste manualmente em IPAM >
+IP Addresses antes de tentar salvar de novo.
 
 ## 4. Ordem sugerida de implementação
 
