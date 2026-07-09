@@ -747,6 +747,13 @@ def guess_interface_type(name):
     # NetBox faz pra LAG), troca esse "virtual" por "lag" nessa linha.
     if n.startswith(("vlan", "vl", "eoip", "tunnel", "gre", "eth-trunk")) or "loopback" in n:
         return "virtual"
+    # Sub-interface dotted-notation (Gi0/1.100, ge-0/0/1.100...) é sempre
+    # uma interface lógica de VLAN por cima de uma física -- isso tem que
+    # ser checado ANTES do match de prefixo físico logo abaixo, senão
+    # "gi0/1.100" cai em 1000base-t só por começar com "gi" (o NetBox só
+    # deixa vincular "parent" em interface type=virtual).
+    if "." in n and n.rsplit(".", 1)[-1].isdigit():
+        return "virtual"
     if n.startswith("bridge") or n == "br" or n.startswith("br-"):
         return "bridge"
     if n.startswith(("port-channel", "portchannel", "po", "lag", "bond")):
@@ -858,6 +865,13 @@ def apply_device_result(nb, device, data, interface_filter=None):
             description = entry.get("description", iface.get("descr") or "")
             iface_type = entry.get("type") or None
             parent_name = entry.get("parent_name") or None
+            # O NetBox só aceita "parent" em interface type=virtual -- se
+            # veio vínculo de VLAN da revisão, força o tipo aqui (a API
+            # rejeita com 400 "Only virtual interfaces may be assigned to
+            # a parent interface" senão), independente do que o dropdown
+            # de Tipo tinha selecionado.
+            if parent_name:
+                iface_type = "virtual"
         else:
             description = iface.get("descr") or ""
 
