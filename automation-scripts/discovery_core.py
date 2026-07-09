@@ -633,12 +633,8 @@ def _huawei_collect_eth_trunk(conn):
     derruba a coleta principal de interfaces (que já está pronta quando
     isso é chamado).
 
-    AINDA NÃO validado contra saída real de 'display eth-trunk' de um
-    device do cliente -- o template usado (ntc-templates
-    huawei_vrp_display_eth-trunk, com o mesmo patch de tolerância a
-    linha desconhecida do huawei_vrp_display_interface/version, ver
-    textfsm_overrides/) segue o formato documentado do comando, mas
-    ainda precisa ser confirmado contra o device de verdade."""
+    Validado contra saída real de 'display eth-trunk' de device do
+    cliente (VS-BGP-Futuretec)."""
     try:
         parsed = conn.send_command("display eth-trunk", use_textfsm=True)
     except Exception:
@@ -649,6 +645,14 @@ def _huawei_collect_eth_trunk(conn):
     for row in parsed:
         trunk = _pick(row, "ETH_TRUNK")
         member = _pick(row, "INTERFACE")
+        # A porta ATIVA como "reference port" da trunk vem anotada como
+        # "GigabitEthernet0/1/1(r)" (e a de maior prioridade como
+        # "...(h)") -- confirmado contra device real. Sem tirar esse
+        # sufixo, a chave desse dict nunca bate com o nome de verdade da
+        # interface (coletado por 'display interface', sem anotação
+        # nenhuma), e essa porta específica fica sem lag_parent.
+        if member:
+            member = re.sub(r"\([a-z]\)$", "", member)
         if trunk and member:
             members[member] = trunk
     return members
@@ -915,7 +919,15 @@ def _merge_interface(snmp_if, ssh_if):
     o SSH falhou nessa interface específica) continua vindo do SNMP,
     que serve de rede de segurança."""
     base = dict(snmp_if or ssh_if or {})
-    for key in ("descr", "admin_status", "oper_status", "mac_address"):
+    # lag_parent só existe do lado do SSH (Eth-Trunk no Huawei via
+    # _huawei_collect_eth_trunk, coluna Parent-LAG no Datacom via
+    # _collect_datacom -- SNMP não tem esse dado) -- sem essa chave aqui,
+    # 'base' (que começa como cópia do lado SNMP quando a interface
+    # aparece nos dois) nunca ganhava o valor detectado via SSH, e o
+    # campo LAG chegava sempre vazio na revisão pra qualquer device
+    # coletado com o método "both" (confirmado: bug reportado pelo
+    # operador em device Datacom E Huawei, ambos usando esse método).
+    for key in ("descr", "admin_status", "oper_status", "mac_address", "lag_parent"):
         ssh_val = (ssh_if or {}).get(key)
         if ssh_val:
             base[key] = ssh_val
