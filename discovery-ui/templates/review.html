@@ -139,6 +139,29 @@
   .table-review .col-status { width: 6%; }
   .table-review .col-ip { width: 22%; }
   .table-review .col-desc { width: 30%; }
+
+  /* Botão "Aprovar"/"Descartar" durante o fetch() (ver script abaixo) --
+     sem isso, o botão desabilitado ficava com o anel de foco/estado
+     ":active" do Bootstrap em teal (--tblr-primary), com baixo contraste
+     e difícil de ler. Força um cinza neutro em qualquer estado
+     (hover/focus/active/disabled) enquanto está processando. */
+  .btn-loading, .btn-loading:hover, .btn-loading:focus, .btn-loading:active, .btn-loading:disabled {
+    background: #3a3f42 !important;
+    border-color: #3a3f42 !important;
+    color: rgba(255, 255, 255, .75) !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    cursor: default !important;
+  }
+  [data-bs-theme=light] .btn-loading,
+  [data-bs-theme=light] .btn-loading:hover,
+  [data-bs-theme=light] .btn-loading:focus,
+  [data-bs-theme=light] .btn-loading:active,
+  [data-bs-theme=light] .btn-loading:disabled {
+    background: #c8cbcd !important;
+    border-color: #c8cbcd !important;
+    color: rgba(4, 7, 10, .6) !important;
+  }
 </style>
 
 <script>
@@ -155,12 +178,18 @@
       if (!btn) return;
       btn.dataset.originalHtml = btn.innerHTML;
       btn.disabled = true;
+      btn.classList.add('btn-loading');
+      // Tira o foco antes de desabilitar -- o anel de foco em teal do
+      // Bootstrap (--tblr-primary) fica "grudado" visualmente junto com
+      // o cinza do disabled, senão (ver CSS .btn-loading acima).
+      btn.blur();
       btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + loadingText;
     }
 
     function restoreButton(btn) {
       if (!btn) return;
       btn.disabled = false;
+      btn.classList.remove('btn-loading');
       if (btn.dataset.originalHtml) btn.innerHTML = btn.dataset.originalHtml;
     }
 
