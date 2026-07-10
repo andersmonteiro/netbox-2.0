@@ -1324,7 +1324,7 @@ def guess_parent_name(name, all_names):
     return None
 
 
-def _sync_interface_ip(nb, nb_if, ip_str, device_id):
+def _sync_interface_ip(nb, nb_if, ip_str, device_id, description=""):
     """Garante que 'ip_str' (CIDR, ex: '10.0.0.1/24') exista no IPAM e
     esteja associado à interface 'nb_if' -- mesmo padrão de busca já
     usado em set_primary_ip() (tenta achar por endereço+device antes de
@@ -1334,23 +1334,42 @@ def _sync_interface_ip(nb, nb_if, ip_str, device_id):
     o que a descoberta encontrou agora na porta é tratado como fonte de
     verdade de onde aquele IP está fisicamente hoje.
 
+    'description' é a mesma descrição já capturada/editada pra interface
+    dona desse IP (ver apply_device_result) -- os equipamentos não
+    expõem uma descrição por IP separada da descrição da porta, então
+    reaproveitar é a única fonte que faz sentido; sem isso, todo IP
+    Address criado no IPAM ficava sem descrição nenhuma, exigindo abrir
+    cada device pra saber pra que serve aquele endereço.
+
     Retorna True se criou ou mudou algo, False se já estava certo."""
     ip_str = (ip_str or "").strip()
     if not ip_str:
         return False
     if "/" not in ip_str:
         ip_str = f"{ip_str}/32"
+    description = description or ""
 
     ip_obj = nb.ipam.ip_addresses.get(address=ip_str, device_id=device_id)
     if not ip_obj:
         ip_obj = nb.ipam.ip_addresses.get(address=ip_str)
     if not ip_obj:
         nb.ipam.ip_addresses.create(
-            {"address": ip_str, "assigned_object_type": "dcim.interface", "assigned_object_id": nb_if.id}
+            {
+                "address": ip_str,
+                "assigned_object_type": "dcim.interface",
+                "assigned_object_id": nb_if.id,
+                "description": description,
+            }
         )
         return True
+    update_payload = {}
     if ip_obj.assigned_object_id != nb_if.id or ip_obj.assigned_object_type != "dcim.interface":
-        ip_obj.update({"assigned_object_type": "dcim.interface", "assigned_object_id": nb_if.id})
+        update_payload["assigned_object_type"] = "dcim.interface"
+        update_payload["assigned_object_id"] = nb_if.id
+    if description and ip_obj.description != description:
+        update_payload["description"] = description
+    if update_payload:
+        ip_obj.update(update_payload)
         return True
     return False
 
@@ -1500,13 +1519,15 @@ def apply_device_result(nb, device, data, interface_filter=None):
             pending_lags.append((name, lag_name))
 
         # IP(s) descoberto(s) na porta (SNMP ipAddrTable e/ou SSH via
-        # TextFSM, ver collect_snmp()/collect_ssh()) -- grava
-        # no IPAM e associa a essa interface. Best-effort por IP: um
-        # endereço mal formado ou um conflito específico não pode
-        # derrubar a aplicação do resto do device.
+        # TextFSM, ver collect_snmp()/collect_ssh()) -- grava no IPAM e
+        # associa a essa interface, com a MESMA descrição da interface
+        # (equipamento não expõe uma descrição por IP separada da
+        # descrição da porta, ver _sync_interface_ip). Best-effort por
+        # IP: um endereço mal formado ou um conflito específico não
+        # pode derrubar a aplicação do resto do device.
         for ip_str in iface.get("ip_addresses") or []:
             try:
-                if _sync_interface_ip(nb, nb_if, ip_str, device.id):
+                if _sync_interface_ip(nb, nb_if, ip_str, device.id, description=description):
                     ip_written += 1
                 if _ensure_prefix(nb, device, ip_str, seen_prefixes):
                     prefixes_created += 1
