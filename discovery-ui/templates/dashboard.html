@@ -78,6 +78,7 @@
             <th>Porta SSH <i class="ti ti-info-circle text-secondary" title="Padrão 22 se deixar em branco"></i></th>
             <th>Community (SNMP) <i class="ti ti-info-circle text-secondary" title="Community string usada no SNMP (ex: public)"></i></th>
             <th>Status <i class="ti ti-info-circle text-secondary" title="Se o device tem tudo configurado pra rodar a descoberta"></i></th>
+            <th class="w-1">Ações</th>
           </tr>
         </thead>
         <tbody>
@@ -103,9 +104,6 @@
 
 {% if rows %}
 <style>
-  .click-edit { cursor: pointer; border-bottom: 1px dashed transparent; }
-  .click-edit:hover, .click-edit:focus { border-bottom-color: var(--nbo-accent); outline: none; }
-
   /* Mais respiro vertical entre as linhas -- table-sm (Tabler/Bootstrap)
      usa um padding bem apertado por padrão, o que deixava os chips de
      Método e os badges de Status "grudados" nas linhas vizinhas. */
@@ -120,6 +118,23 @@
      que tá processando em vez de parecer que a tela travou/recarregou
      do nada quando a linha troca de repente ao final. */
   #devices-table > tbody > tr.nbo-row-saving { opacity: .5; pointer-events: none; transition: opacity .15s ease; }
+
+  /* Botões de Editar/Salvar/Cancelar por linha (ver setRowEditMode() no
+     JS abaixo) -- ícone discreto no tom neutro do tema, acento teal só
+     no hover/confirmação, pra não competir visualmente com os badges de
+     Status/Conectividade da mesma linha. */
+  .nbo-row-actions { display: inline-flex; gap: .25rem; }
+  .nbo-row-actions .btn { padding: .25rem .45rem; line-height: 1; }
+  .nbo-row-edit-btn, .nbo-row-cancel-btn {
+    background: transparent; border: 1px solid rgba(255,255,255,.14); color: var(--nbo-text-muted);
+  }
+  .nbo-row-edit-btn:hover { color: var(--nbo-accent); border-color: var(--nbo-accent); }
+  .nbo-row-cancel-btn:hover { color: var(--tblr-red); border-color: var(--tblr-red); }
+  .nbo-row-save-btn { background: var(--nbo-accent); border: 1px solid var(--nbo-accent); color: #04070a; }
+  .nbo-row-save-btn:hover { opacity: .85; }
+  [data-bs-theme=light] .nbo-row-edit-btn, [data-bs-theme=light] .nbo-row-cancel-btn {
+    border-color: rgba(0,0,0,.16); color: var(--nbo-text-muted);
+  }
 </style>
 <script>
 (function () {
@@ -198,15 +213,19 @@
   });
 
   // ------------------------------------------------------------------
-  // Clique-pra-editar: cada campo vira input/select só quando clicado,
-  // sem botão de editar separado. Confirma salvando (Enter ou clicar
-  // fora com o valor mudado); Esc cancela sem salvar.
+  // Edição em lote por linha: o lápis (nbo-row-edit-btn) abre TODOS os
+  // campos editáveis da linha de uma vez -- sem sair da página, sem
+  // popup. O operador preenche o que quiser e confirma com o ✓
+  // (nbo-row-save-btn), que salva tudo numa request só; o ✕
+  // (nbo-row-cancel-btn) ou Esc descarta e restaura a linha como veio
+  // do servidor. Antes disso, cada campo salvava sozinho ao perder o
+  // foco (clique-pra-editar), o que trocava a linha inteira (ver
+  // replaceRow()) a CADA campo -- editando vários campos seguidos
+  // parecia um "refresh" incômodo repetido várias vezes.
   // ------------------------------------------------------------------
 
   function saveRow(tr) {
     var id = tr.dataset.id;
-    var fields = tr.querySelectorAll('.edit-val');
-    var data = new URLSearchParams();
     var nameEl = tr.querySelector('td:nth-child(2) .edit-val');
     var siteEl = tr.querySelector('.f-site');
     var deviceTypeEl = tr.querySelector('td:nth-child(5) .edit-val');
@@ -216,6 +235,7 @@
     var sshPortEl = tr.querySelector('td:nth-child(10) .edit-val');
     var communityEl = tr.querySelector('td:nth-child(11) .edit-val');
 
+    var data = new URLSearchParams();
     data.set('name', (nameEl.value || '').trim());
     data.set('site_id', siteEl.value);
     data.set('device_type_id', deviceTypeEl.value);
@@ -248,7 +268,8 @@
           // de conectividade no servidor (ver test_ssh_connectivity()/
           // test_snmp_connectivity() em discovery_core.py) -- só ele sabe
           // o resultado (verde/vermelho dos badges SSH/SNMP) e o novo
-          // Status ("pronto"/"incompleto").
+          // Status ("pronto"/"incompleto"). A linha nova já volta em modo
+          // "visualização" (é o HTML padrão renderizado pelo servidor).
           return fetch('/device/' + id + '/row')
             .then(function (r) { return r.text(); })
             .then(function (html) {
@@ -269,6 +290,18 @@
       });
   }
 
+  function cancelRowEdit(tr) {
+    // Descarta o que foi digitado/selecionado -- busca a linha de novo
+    // do servidor (fonte de verdade) e substitui, em vez de tentar
+    // reverter campo por campo na mão (mais simples e cobre TODOS os
+    // tipos de campo -- texto, senha, select -- sem duplicar lógica).
+    var id = tr.dataset.id;
+    fetch('/device/' + id + '/row')
+      .then(function (r) { return r.text(); })
+      .then(function (html) { replaceRow(tr, html); })
+      .catch(function () { setRowEditMode(tr, false); });
+  }
+
   function parseRowHtml(html) {
     var tbody = document.createElement('tbody');
     tbody.innerHTML = html.trim();
@@ -285,54 +318,26 @@
     return newTr;
   }
 
-  function wireCell(td, tr) {
-    var viewEl = td.querySelector('.view-val');
-    var editEl = td.querySelector('.edit-val');
-    if (!viewEl || !editEl) return;
-
-    function enterEdit() {
-      viewEl.style.display = 'none';
-      editEl.style.display = '';
-      editEl.focus();
-      if (editEl.select) editEl.select();
-    }
-
-    var startValue = editEl.value;
-
-    function exitEdit(commit) {
-      if (commit) {
-        saveRow(tr);
-      } else {
-        editEl.value = startValue;
-        viewEl.style.display = '';
-        editEl.style.display = 'none';
-      }
-    }
-
-    viewEl.addEventListener('click', enterEdit);
-    viewEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enterEdit(); }
+  function setRowEditMode(tr, editing) {
+    tr.querySelectorAll('td').forEach(function (td) {
+      var viewEl = td.querySelector('.view-val');
+      var editEl = td.querySelector('.edit-val');
+      if (!viewEl || !editEl) return;
+      viewEl.style.display = editing ? 'none' : '';
+      editEl.style.display = editing ? '' : 'none';
     });
-
-    if (editEl.tagName === 'SELECT') {
-      editEl.addEventListener('change', function () { exitEdit(true); });
-      editEl.addEventListener('blur', function () {
-        if (editEl.style.display === 'none') return;
-        if (editEl.value !== startValue) { exitEdit(true); }
-        else { viewEl.style.display = ''; editEl.style.display = 'none'; }
-      });
-      editEl.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { exitEdit(false); }
-      });
-    } else {
-      editEl.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { editEl.blur(); }
-        if (e.key === 'Escape') { exitEdit(false); }
-      });
-      editEl.addEventListener('blur', function () {
-        if (editEl.value !== startValue) { exitEdit(true); }
-        else { viewEl.style.display = ''; editEl.style.display = 'none'; }
-      });
+    var editBtn = tr.querySelector('.nbo-row-edit-btn');
+    var saveBtn = tr.querySelector('.nbo-row-save-btn');
+    var cancelBtn = tr.querySelector('.nbo-row-cancel-btn');
+    if (editBtn) editBtn.style.display = editing ? 'none' : '';
+    if (saveBtn) saveBtn.style.display = editing ? '' : 'none';
+    if (cancelBtn) cancelBtn.style.display = editing ? '' : 'none';
+    if (editing) {
+      var firstEdit = tr.querySelector('.edit-val');
+      if (firstEdit) {
+        firstEdit.focus();
+        if (firstEdit.select) firstEdit.select();
+      }
     }
   }
 
@@ -345,13 +350,22 @@
         regionVal.textContent = (opt && opt.dataset.region) ? opt.dataset.region : '—';
       });
     }
-    // A célula de Conectividade (.proto-cell, ver _device_row.html) não
-    // tem .view-val/.edit-val -- é só um par de badges estáticos
-    // (SSH/SNMP) coloridos pelo servidor, não editável por clique.
-    // wireCell() já ignora sozinho qualquer <td> sem esses elementos,
-    // então não precisa de nenhum caso especial aqui.
-    tr.querySelectorAll('td').forEach(function (td) {
-      wireCell(td, tr);
+
+    var editBtn = tr.querySelector('.nbo-row-edit-btn');
+    var saveBtn = tr.querySelector('.nbo-row-save-btn');
+    var cancelBtn = tr.querySelector('.nbo-row-cancel-btn');
+    if (editBtn) editBtn.addEventListener('click', function () { setRowEditMode(tr, true); });
+    if (saveBtn) saveBtn.addEventListener('click', function () { saveRow(tr); });
+    if (cancelBtn) cancelBtn.addEventListener('click', function () { cancelRowEdit(tr); });
+
+    // Enter dentro de um campo NÃO pode submeter o form de Descoberta
+    // (a linha inteira fica dentro do <form id="discover-form">) --
+    // só confirma com o botão ✓; Esc cancela igual ao botão ✕.
+    tr.querySelectorAll('.edit-val').forEach(function (editEl) {
+      editEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); }
+        if (e.key === 'Escape') { cancelRowEdit(tr); }
+      });
     });
   }
 
