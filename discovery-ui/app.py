@@ -14,8 +14,7 @@ Fluxo:
                   rodar a descoberta
   /device/new  -> cadastra um device novo (Site/Role/Type + IP +
                   método + credencial de descoberta)
-  /device/<id>/edit -> edita IP/Platform/credencial de um device já
-                  existente
+  /device/<id>/edit -> edita IP/credencial de um device já existente
   /discover (POST) -> roda a coleta nos devices selecionados, grava em
                   discovery_output/*.json (nada é gravado no NetBox
                   ainda)
@@ -618,11 +617,6 @@ def dashboard():
         devices = []
         nb = None
 
-    try:
-        platforms = list(nb.dcim.platforms.all()) if nb else []
-    except Exception:
-        platforms = []
-
     sites = _load_sites(nb) if nb else []
     device_types = _load_device_types(nb) if nb else []
 
@@ -634,7 +628,7 @@ def dashboard():
     filter_manufacturers = sorted({r["manufacturer"] for r in rows if r["manufacturer"]})
 
     return render_template(
-        "dashboard.html", rows=rows, pending_count=pending_count, platforms=platforms,
+        "dashboard.html", rows=rows, pending_count=pending_count,
         sites=sites, device_types=device_types,
         filter_sites=filter_sites, filter_manufacturers=filter_manufacturers,
     )
@@ -669,7 +663,6 @@ def device_new():
     sites = list(nb.dcim.sites.all())
     roles = list(nb.dcim.device_roles.all())
     device_types = list(nb.dcim.device_types.all())
-    platforms = list(nb.dcim.platforms.all())
     if not (sites and roles and device_types):
         flash(
             "Ainda não existe nenhum Site, Device Role ou Device Type cadastrado "
@@ -678,20 +671,10 @@ def device_new():
             "instalação, não precisa repetir por device.",
             "error",
         )
-    if not platforms:
-        flash(
-            "Nenhuma Platform cadastrada no NetBox ainda -- opcional, só "
-            "necessário se quiser FORÇAR manualmente como conectar via SSH "
-            "num device específico (o normal é resolver sozinho pelo "
-            "Fabricante). Crie em NetBox > Devices > Platforms > Add, com o "
-            "Slug igual a um device_type válido do Netmiko (ex: 'huawei_vrp', "
-            "'cisco_ios', 'juniper_junos').",
-            "error",
-        )
 
     return render_template(
         "device_form.html", mode="new", device=None, cf={},
-        sites=sites, roles=roles, device_types=device_types, platforms=platforms,
+        sites=sites, roles=roles, device_types=device_types,
     )
 
 
@@ -713,21 +696,10 @@ def device_edit(device_id):
             flash(f"Erro ao atualizar device: {exc}", "error")
             return redirect(url_for("device_edit", device_id=device_id))
 
-    platforms = list(nb.dcim.platforms.all())
-    if not platforms:
-        flash(
-            "Nenhuma Platform cadastrada no NetBox ainda -- opcional, só "
-            "necessário se quiser FORÇAR manualmente como conectar via SSH "
-            "num device específico (o normal é resolver sozinho pelo "
-            "Fabricante). Crie em NetBox > Devices > Platforms > Add, com o "
-            "Slug igual a um device_type válido do Netmiko (ex: 'huawei_vrp', "
-            "'cisco_ios', 'juniper_junos').",
-            "error",
-        )
     cf = device.custom_fields or {}
     return render_template(
         "device_form.html", mode="edit", device=device, cf=cf,
-        sites=[], roles=[], device_types=[], platforms=platforms,
+        sites=[], roles=[], device_types=[],
     )
 
 
@@ -735,8 +707,8 @@ def device_edit(device_id):
 @login_required
 def device_inline_update(device_id):
     """Endpoint AJAX usado pela edição inline (mesma linha) do dashboard
-    -- aplica nome/site/device type/platform/IP/credenciais de
-    descoberta sem sair da página."""
+    -- aplica nome/site/device type/IP/credenciais de descoberta sem
+    sair da página."""
     try:
         nb = get_nb()
         device = nb.dcim.devices.get(device_id)
@@ -764,13 +736,15 @@ def device_row(device_id):
     return render_template(
         "_device_row.html", r=row,
         sites=_load_sites(nb), device_types=_load_device_types(nb),
-        platforms=list(nb.dcim.platforms.all()),
     )
 
 
 def _apply_discovery_form(nb, device, form):
     """Lê os campos comuns ao formulário de novo/editar device e grava
-    Nome, Platform, Primary IP e os custom fields de descoberta.
+    Nome, Primary IP e os custom fields de descoberta. Platform não é
+    mais um campo desse formulário (removido -- ver _build_row(): é
+    resolvida automaticamente a partir do Fabricante; override manual,
+    se algum dia precisar, é direto no NetBox).
 
     Não existe mais escolha manual de "Método" (SSH/SNMP/os dois) -- o
     operador só preenche as credenciais de qualquer protocolo que
@@ -797,10 +771,6 @@ def _apply_discovery_form(nb, device, form):
     device_type_id = form.get("device_type_id")
     if device_type_id:
         device.update({"device_type": int(device_type_id)})
-
-    platform_id = form.get("platform_id")
-    if platform_id:
-        device.update({"platform": int(platform_id)})
 
     primary_ip = form.get("primary_ip", "").strip()
     ip_changed = False

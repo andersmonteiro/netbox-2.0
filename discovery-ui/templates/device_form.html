@@ -47,16 +47,6 @@
           </div>
 
           <div class="mb-3">
-            <label class="form-label">Platform <span class="text-secondary">(só necessário se o método for SSH)</span></label>
-            <select name="platform_id" class="form-select">
-              <option value="">— nenhuma —</option>
-              {% for p in platforms %}
-                <option value="{{ p.id }}" {% if device and device.platform and device.platform.id == p.id %}selected{% endif %}>{{ p.name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-
-          <div class="mb-3">
             <label class="form-label">Descoberta: credenciais <span class="text-secondary">(preencha SSH e/ou SNMP -- não precisa escolher método, é detectado sozinho pelo que estiver preenchido)</span></label>
           </div>
 
