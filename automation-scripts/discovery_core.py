@@ -1056,22 +1056,24 @@ def _collect_datacom(device, username, password, port=None):
     return data
 
 
+# Texto ESTÁVEL (não mudar sem atualizar collect_both() abaixo, que
+# filtra esse erro específico pelo prefixo -- ver comentário lá).
+_SSH_NO_DEVICE_TYPE_ERROR = (
+    "não consegui adivinhar como conectar via SSH pelo Fabricante -- "
+    "confirme se o Device Type tem um Fabricante reconhecido "
+    "(Cisco/Juniper/Arista/Palo Alto/Huawei/Datacom) ou defina a "
+    "Platform manualmente no device (NetBox > Devices > editar, "
+    "com o Slug igual ao device_type do Netmiko, ex: 'cisco_ios')"
+)
+
+
 def collect_ssh(device, username, password, port=None):
     device_type = device.platform.slug if device.platform else None
     if not device_type:
         manufacturer, device_type_model = _device_manufacturer_info(device)
         device_type = resolve_ssh_device_type(manufacturer, device_type_model)
     if not device_type:
-        return {
-            "method": "ssh",
-            "errors": [
-                "não consegui adivinhar como conectar via SSH pelo Fabricante -- "
-                "confirme se o Device Type tem um Fabricante reconhecido "
-                "(Cisco/Juniper/Arista/Palo Alto/Huawei/Datacom) ou defina a "
-                "Platform manualmente no device (NetBox > Devices > editar, "
-                "com o Slug igual ao device_type do Netmiko, ex: 'cisco_ios')"
-            ],
-        }
+        return {"method": "ssh", "errors": [_SSH_NO_DEVICE_TYPE_ERROR]}
     if not device.primary_ip4:
         return {"method": "ssh", "errors": ["sem IP de gerência (primary_ip4)"]}
 
@@ -1198,10 +1200,25 @@ def collect_both(device, credentials, snmp_timeout=5, snmp_retries=1):
         ssh_username=username, ssh_password=password, ssh_port=port,
     )
 
+    # Filtra especificamente o erro "sem device_type SSH reconhecido"
+    # (_SSH_NO_DEVICE_TYPE_ERROR) do resultado final -- pra method="both"
+    # esse erro é ESPERADO e PERMANENTE (o fabricante nunca vai ganhar
+    # um device_type reconhecido sozinho, ver resolve_ssh_device_type()),
+    # não um problema pontual que o operador precisa resolver -- é
+    # exatamente o cenário que "both" foi desenhado pra cobrir (SNMP
+    # sozinho já é suficiente, SSH é só bônus quando dá certo, ver
+    # docstring acima). Mostrar isso como um alerta toda vez que o
+    # operador roda a descoberta desse device (ex: qualquer MikroTik)
+    # era só ruído sem ação nenhuma a tomar (bug reportado: usuário via
+    # a mensagem de novo a cada scan e pedia pra tirar). Outros erros de
+    # SSH (timeout, credencial errada etc -- esses SIM são acionáveis)
+    # continuam aparecendo normalmente.
+    ssh_errors = [e for e in (ssh_data.get("errors") or []) if e != _SSH_NO_DEVICE_TYPE_ERROR]
+
     data = {
         "method": "both",
         "host": snmp_data.get("host") or ssh_data.get("host"),
-        "errors": list(ssh_data.get("errors") or []) + list(snmp_data.get("errors") or []),
+        "errors": ssh_errors + list(snmp_data.get("errors") or []),
         "sys_name": snmp_data.get("sys_name"),
         "sys_descr": snmp_data.get("sys_descr"),
         "serial": ssh_data.get("serial"),
