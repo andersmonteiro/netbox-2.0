@@ -177,20 +177,7 @@ OID_IP_AD_ENT_NET_MASK = "1.3.6.1.2.1.4.20.1.3"
 def _snmp_cmd(binary, host, community, oid, timeout, retries):
     return [
         binary, "-v2c", "-c", community,
-        # q = sem "Type:"/enum verboso na saída, n = OID numérico, a =
-        # força string OCTET STRING sempre como texto -- SEM o "a", o
-        # net-snmp troca sozinho pra "Hex-STRING" (ex: "46 75 74 75 72
-        # 65..." em vez de "Futuretec") sempre que a string tem um byte
-        # não-ASCII "imprimível" pro C locale -- e isso inclui QUALQUER
-        # acento (á/é/í/ó/ú/ç/ã/õ), então sys_name/ifAlias/comentário com
-        # acento (comuníssimo em português, ver bug reportado:
-        # "Futuretec_Escritório" saindo como hex) sempre vinha ilegível.
-        # Ver decode manual em snmp_get()/snmp_walk() abaixo -- precisa
-        # andar junto com essa flag, porque o byte cru do acento (ex:
-        # 0xF3 sozinho) não é UTF-8 válido, e sem o fallback de encoding
-        # o subprocess.run(text=True) padrão quebraria com
-        # UnicodeDecodeError em vez de só devolver a string certa.
-        "-O", "qna",
+        "-O", "qn",  # q = sem "Type:"/enum verboso na saída, n = OID numérico
         "-t", str(timeout), "-r", str(retries),
         host, oid,
     ]
@@ -214,14 +201,43 @@ def _decode_snmp_bytes(raw):
             return raw.decode("utf-8", errors="replace")
 
 
+# Sem a flag "-Oa": o net-snmp troca sozinho pra "Hex-STRING" (ex: "46
+# 75 74 75 72 65 74 65 63 5F 45 73 63 72 69 74 F3 72 69 6F" em vez de
+# "Futuretec_Escritório") qualquer OCTET STRING que tenha um byte
+# não-ASCII "imprimível" pro C locale -- e isso inclui QUALQUER acento
+# (á/é/í/ó/ú/ç/ã/õ), comuníssimo em texto em português. TENTAMOS usar
+# "-Oa" pra forçar sempre texto (commit anterior), mas "-Oa" é
+# DESTRUTIVO: ele força a representação ASCII SUBSTITUINDO cada byte
+# não-ASCII por um "." ANTES de nos entregar a saída (ex:
+# "Futuretec_Escrit.rio", com o acento já perdido pra sempre -- bug
+# reportado de novo depois do fix errado). Sem "-Oa" o net-snmp
+# preserva os bytes originais (só que como hex-dump), então detectamos
+# esse formato aqui e convertemos DE VOLTA pros bytes reais + decode
+# (ver _decode_snmp_bytes) -- funciona porque só usamos isso em campos
+# de texto (sys_name/sys_descr/ifDescr/ifName/ifAlias), nunca em OIDs
+# binários de verdade (ex: endereço MAC), então o risco de confundir
+# uma string legítima com esse padrão específico (só dígitos hex em
+# pares separados por espaço, SEM aspas ao redor -- valor "normal"
+# sempre vem entre aspas) é desprezível.
+_SNMP_HEX_DUMP_RE = re.compile(r"^[0-9A-Fa-f]{2}(?: [0-9A-Fa-f]{2})*$")
+
+
+def _maybe_decode_snmp_hexdump(value):
+    if not value or not _SNMP_HEX_DUMP_RE.match(value):
+        return value
+    try:
+        raw = bytes.fromhex(value)
+    except ValueError:
+        return value
+    return _decode_snmp_bytes(raw)
+
+
 def snmp_get(host, community, oid, timeout=5, retries=1):
     cmd = _snmp_cmd("snmpget", host, community, oid, timeout, retries)
     # text=False (padrão) -- pega bytes crus e decodifica na mão via
-    # _decode_snmp_bytes() com fallback UTF-8/Latin-1 (ver comentário
-    # em _snmp_cmd()). Com text=True o Python decodifica direto como
-    # UTF-8 estrito (ou o encoding do locale do container) e QUEBRA com
-    # UnicodeDecodeError assim que aparece um acento em Latin-1 (ex:
-    # sys_name "Futuretec_Escritório" com o 'ó' cru).
+    # _decode_snmp_bytes() (fallback UTF-8/Latin-1) em vez de deixar o
+    # subprocess.run(text=True) padrão decodificar como UTF-8 estrito
+    # (quebraria com UnicodeDecodeError em qualquer byte de acento cru).
     result = subprocess.run(cmd, capture_output=True, timeout=timeout * (retries + 1) + 5)
     if result.returncode != 0:
         raise RuntimeError(_decode_snmp_bytes(result.stderr).strip() or "snmpget falhou (sem stderr)")
@@ -229,7 +245,10 @@ def snmp_get(host, community, oid, timeout=5, retries=1):
     if not line:
         return None
     _, _, value = line.partition(" ")
-    return value.strip().strip('"')
+    value = value.strip()
+    if value.startswith('"') and value.endswith('"'):
+        return value.strip('"')
+    return _maybe_decode_snmp_hexdump(value)
 
 
 def snmp_walk(host, community, oid, timeout=5, retries=1):
@@ -245,7 +264,11 @@ def snmp_walk(host, community, oid, timeout=5, retries=1):
             continue
         oid_full, _, value = line.partition(" ")
         idx = oid_full.rsplit(".", 1)[-1]  # último componente do OID = ifIndex
-        out[idx] = value.strip().strip('"')
+        value = value.strip()
+        if value.startswith('"') and value.endswith('"'):
+            out[idx] = value.strip('"')
+        else:
+            out[idx] = _maybe_decode_snmp_hexdump(value)
     return out
 
 
