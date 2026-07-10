@@ -880,6 +880,23 @@ def _collect_datacom(device, username, password, port=None):
         data["errors"].append(f"falha ao conectar: {exc}")
         return data
 
+    # O prompt do DmOS manda um código de escape ANSI (ex: '\x1b[?7h',
+    # liga o auto-wrap do terminal) colado JUNTO com o texto do prompt
+    # (ex: 'SW.CORE-DTC#') na mesma leitura -- o driver "generic_ssh" do
+    # Netmiko não filtra escape codes por padrão, então o prompt
+    # detectado na conexão (base_prompt) fica com esse lixo dentro, e
+    # todo send_command() depois falha com "Pattern not detected"
+    # (regex do prompt não bate mais com a saída limpa dos comandos
+    # seguintes). Ligar ansi_escape_codes ANTES de redetectar o prompt
+    # faz o Netmiko filtrar esse tipo de sequência nas leituras
+    # seguintes, incluindo essa redetecção -- resolve na raiz, sem
+    # precisar de expect_string manual em cada send_command().
+    try:
+        conn.ansi_escape_codes = True
+        conn.set_base_prompt()
+    except Exception:
+        pass
+
     descr_by_name = {}
     link_interfaces = []
     l3_interfaces = []
