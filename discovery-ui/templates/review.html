@@ -41,8 +41,19 @@
     {% if item.data.serial %}<div class="text-secondary mb-2">serial: {{ item.data.serial }}</div>{% endif %}
 
     {% if item.data.errors %}
+      {# alert-warning (âmbar), não alert-danger (vermelho): um item só
+         chega até aqui se discover() já confirmou que trouxe ALGUMA
+         coisa de útil (interfaces e/ou sys_name -- ver app.py:discover(),
+         que descarta e nem grava o JSON quando não trouxe nada). Então
+         qualquer erro listado aqui é sempre PARCIAL (ex: method="both"
+         num fabricante sem device_type SSH reconhecido -- ver
+         collect_ssh()/collect_both() em discovery_core.py -- a coleta
+         segue de boa só com o SNMP), nunca um "isso quebrou tudo" --
+         vermelho muito alarmante confundia o operador vendo os dados
+         coletados do lado (ex: "19 interface(s), 9 up") junto com uma
+         caixa de erro em vermelho. #}
       {% for err in item.data.errors %}
-        <div class="alert alert-danger">{{ err }}</div>
+        <div class="alert alert-warning">{{ err }}</div>
       {% endfor %}
     {% endif %}
 
