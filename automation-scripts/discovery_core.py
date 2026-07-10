@@ -1219,7 +1219,12 @@ def guess_interface_type(name):
     device real: "Eth-Trunk" (LAG, mas tratado como Virtual -- ver
     comentário abaixo), "XGigabitEthernet" (10GE/SFP+ -- NÃO confundir com
     GigabitEthernet comum, o "X" na frente muda tudo), "100GE"/"40GE"
-    (QSFP28/QSFP+), "InLoopBack" (variação de nome do loopback)."""
+    (QSFP28/QSFP+), "InLoopBack" (variação de nome do loopback) -- e a
+    nomenclatura Datacom DmOS, com o número da velocidade por extenso em
+    vez de dígitos (ex: "ten-gigabit-ethernet-1/1/1",
+    "forty-gigabit-ethernet-1/1/1" -- ver _datacom_iface_prefix() acima,
+    que gera esse formato a partir do cabeçalho "Ten/Forty/... Gigabit
+    Ethernet Interfaces:" do próprio equipamento)."""
     n = (name or "").strip().lower()
     if not n:
         return "other"
@@ -1240,6 +1245,19 @@ def guess_interface_type(name):
         return "bridge"
     if n.startswith(("port-channel", "portchannel", "po", "lag", "bond")):
         return "lag"
+    # Datacom DmOS escreve a velocidade por extenso ("ten-", "forty-",
+    # "hundred-", "twenty-five-") em vez de dígitos -- checado ANTES dos
+    # padrões numéricos abaixo (100G/40G/25G/10G), maior primeiro, pra
+    # "hundred-gigabit-ethernet" não cair sem querer em "gigabit-ethernet"
+    # genérico (1G) só por conter esse pedaço no meio do nome.
+    if n.startswith("hundred-gigabit-ethernet"):
+        return "100gbase-x-qsfp28"
+    if n.startswith("forty-gigabit-ethernet"):
+        return "40gbase-x-qsfpp"
+    if n.startswith(("twenty-five-gigabit-ethernet", "twentyfive-gigabit-ethernet")):
+        return "25gbase-x-sfp28"
+    if n.startswith("ten-gigabit-ethernet"):
+        return "10gbase-x-sfpp"
     # 100G/40G verificado ANTES de 10G -- Huawei "100GE0/0/1" não pode
     # cair na regra de 10G por engano.
     if n.startswith(("100ge", "100gb")) or "100gbase" in n:
@@ -1256,7 +1274,10 @@ def guess_interface_type(name):
         return "1000base-x-sfp"
     if n.startswith("fa") or "fastethernet" in n:
         return "100base-tx"
-    if n.startswith(("ether", "gi", "ge", "eth")) or "gigabitethernet" in n:
+    # "gigabit-ethernet-1/1/1" (Datacom, porta de 1G -- sem "ten-"/
+    # "forty-"/... na frente, já eliminados pelos checks acima) cai aqui
+    # igual ao "gigabitethernet" (Cisco, sem hífen).
+    if n.startswith(("ether", "gi", "ge", "eth")) or "gigabitethernet" in n or "gigabit-ethernet" in n:
         return "1000base-t"
     return "other"
 
