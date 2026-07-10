@@ -573,7 +573,7 @@
         var noneUp = data.running === 0;
         dot.style.background = allUp ? '#00f2d4' : (noneUp ? '#e24b4a' : '#f0a060');
         badge.className = 'badge ' + (allUp ? 'bg-teal-lt' : (noneUp ? 'bg-danger-lt' : 'bg-warning-lt'));
-        text.textContent = 'Serviços ' + data.running + '/' + data.total + ' online';
+        text.textContent = 'Serviços: ' + data.running + '/' + data.total + ' online';
       }
 
       function renderList(data) {
