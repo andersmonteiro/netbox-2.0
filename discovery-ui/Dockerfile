@@ -38,9 +38,10 @@ COPY automation-scripts/encrypt_existing_secrets.py .
 COPY automation-scripts/backfill_connectivity_status.py .
 COPY discovery-ui/app.py .
 COPY discovery-ui/templates ./templates
+COPY discovery-ui/static ./static
 
 RUN mkdir -p discovery_output/applied discovery_output/discarded
 
 EXPOSE 5050
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "2", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "2
