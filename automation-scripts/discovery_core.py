@@ -778,10 +778,81 @@ def _datacom_parse_link(output):
     return interfaces
 
 
+_DATACOM_L3_HEADER_RE = re.compile(r"^interface\s+l3\s+(\S+)\s*$")
+
+
+def _datacom_parse_l3_interfaces(output):
+    """Parseia 'show running-config interface l3' -> lista de dicts
+    {name, vlan, ip_addresses, descr} -- uma entrada por bloco
+    'interface l3 <nome> ... !'.
+
+    Essas são interfaces LÓGICAS roteadas (L3/SVI, "lower-layer-if vlan
+    <id>" é a VLAN por baixo), bem diferentes das portas físicas
+    parseadas por _datacom_parse_description()/_datacom_parse_link()
+    acima -- o nome AQUI não segue o padrão "<tipo>-X/Y/Z": é o nome
+    que o próprio operador deu na hora de criar a interface (ex:
+    'ACESSO-TX', 'jdpa-perioto', 'POP-CHIODI'), já funcionando como
+    descrição por si só -- não existe um "description" separado nesse
+    bloco no equipamento confirmado, mas o parser reconhece um se
+    aparecer num device diferente (fica pra Coluna Descrição na
+    revisão; sem ele, cai no nome + VLAN, ver _collect_datacom).
+    'ipv4 address secondary' (endereço extra na mesma interface, ex: o
+    device do cliente tem em 'POP-CHIODI') vira mais um item em
+    ip_addresses, junto com o primeiro. Interface sem
+    'lower-layer-if'/'ipv4 address' nenhum dentro do bloco (criada mas
+    nunca configurada, ex: 'Gerencia-POP_CIDUN2') ainda assim entra na
+    lista, só sem vlan/IP."""
+    interfaces = []
+    current = None
+    for raw_line in output.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        m = _DATACOM_L3_HEADER_RE.match(stripped)
+        if m:
+            if current is not None:
+                interfaces.append(current)
+            current = {"name": m.group(1), "vlan": None, "ip_addresses": [], "descr": ""}
+            continue
+        if stripped == "!":
+            if current is not None:
+                interfaces.append(current)
+                current = None
+            continue
+        if current is None:
+            continue
+        m = re.match(r"^lower-layer-if\s+vlan\s+(\d+)\s*$", stripped, re.IGNORECASE)
+        if m:
+            current["vlan"] = m.group(1)
+            continue
+        # 'secondary' tem que ser checado ANTES do padrão genérico
+        # abaixo, senão "ipv4 address secondary 1.2.3.4/24" cairia (por
+        # engano) no grupo genérico com "secondary" como se fosse o
+        # endereço.
+        m = re.match(r"^ipv4\s+address\s+secondary\s+(\S+)\s*$", stripped, re.IGNORECASE)
+        if m:
+            current["ip_addresses"].append(m.group(1))
+            continue
+        m = re.match(r"^ipv4\s+address\s+(\S+)\s*$", stripped, re.IGNORECASE)
+        if m:
+            current["ip_addresses"].append(m.group(1))
+            continue
+        m = re.match(r"^description\s+(.+)$", stripped, re.IGNORECASE)
+        if m:
+            current["descr"] = m.group(1).strip().strip('"')
+            continue
+    if current is not None:
+        interfaces.append(current)
+    return interfaces
+
+
 def _collect_datacom(device, username, password, port=None):
     """Coleta Datacom DmOS via SSH -- 'show interface description' (nome
-    completo + descrição sem truncar) e 'show interface link' (status +
-    LAG pai), sem TextFSM (não existe template pra esse fabricante)."""
+    completo + descrição sem truncar), 'show interface link' (status +
+    LAG pai) e 'show running-config interface l3' (interfaces roteadas
+    L3/SVI: VLAN + IP(s) de gerência/cliente + descrição, ver
+    _datacom_parse_l3_interfaces()), sem TextFSM (não existe template
+    pra esse fabricante)."""
     if not device.primary_ip4:
         return {"method": "ssh", "errors": ["sem IP de gerência (primary_ip4)"]}
 
@@ -811,6 +882,7 @@ def _collect_datacom(device, username, password, port=None):
 
     descr_by_name = {}
     link_interfaces = []
+    l3_interfaces = []
     try:
         try:
             descr_out = conn.send_command("show interface description")
@@ -822,6 +894,11 @@ def _collect_datacom(device, username, password, port=None):
             link_interfaces = _datacom_parse_link(link_out)
         except Exception as exc:
             data["errors"].append(f"falha ao rodar 'show interface link': {exc}")
+        try:
+            l3_out = conn.send_command("show running-config interface l3")
+            l3_interfaces = _datacom_parse_l3_interfaces(l3_out)
+        except Exception as exc:
+            data["errors"].append(f"falha ao rodar 'show running-config interface l3': {exc}")
     finally:
         try:
             conn.disconnect()
@@ -852,6 +929,39 @@ def _collect_datacom(device, username, password, port=None):
                 "oper_status": "unknown", "mac_address": None, "ip_addresses": [],
                 "lag_parent": None,
             })
+
+    # Interfaces L3/SVI ("show running-config interface l3", ver
+    # _datacom_parse_l3_interfaces() acima) -- entram como interfaces
+    # NOVAS (nome livre escolhido pelo operador, ex: "ACESSO-TX",
+    # "jdpa-perioto", nunca colide com o padrão "<tipo>-X/Y/Z" das
+    # portas físicas acima). "type_hint": "virtual" força o tipo no
+    # NetBox pra "Virtual" (são interfaces lógicas roteadas, sem porta
+    # física própria) em vez de cair no chute por nome de
+    # guess_interface_type() (ver app.py:review(), que agora prioriza
+    # esse campo quando presente) -- um nome tipo "ACESSO-TX" não bate
+    # com nenhum padrão conhecido e cairia em "Outros" sem isso.
+    for l3 in l3_interfaces:
+        name = l3["name"]
+        if name in seen:
+            continue
+        seen.add(name)
+        vlan = l3.get("vlan")
+        if l3.get("descr"):
+            descr = l3["descr"]
+        elif vlan:
+            descr = f"{name} (VLAN {vlan})"
+        else:
+            descr = name
+        interfaces.append({
+            "name": name,
+            "descr": descr,
+            "admin_status": "up",
+            "oper_status": "unknown",
+            "mac_address": None,
+            "ip_addresses": l3.get("ip_addresses") or [],
+            "lag_parent": None,
+            "type_hint": "virtual",
+        })
 
     if not interfaces and not data["errors"]:
         data["errors"].append(

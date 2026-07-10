@@ -994,8 +994,13 @@ def review():
                 # Chute de tipo/flag de VLAN calculados aqui (não gravados
                 # no JSON em disco) -- assim uma descoberta que já estava
                 # pendente antes dessa mudança também ganha a sugestão sem
-                # precisar rodar de novo.
-                iface["guessed_type"] = core.guess_interface_type(iface.get("name"))
+                # precisar rodar de novo. "type_hint" (quando o coletor já
+                # sabe o tipo com certeza, ex: interfaces L3/SVI do
+                # Datacom -- ver _collect_datacom() em discovery_core.py)
+                # tem prioridade sobre o chute por nome: um nome escolhido
+                # livremente pelo operador no device (ex: "ACESSO-TX") não
+                # bate com nenhum padrão reconhecido e cairia em "Outros".
+                iface["guessed_type"] = iface.get("type_hint") or core.guess_interface_type(iface.get("name"))
                 iface["is_vlan"] = core.is_vlan_ifname(iface.get("name"))
                 # Prioridade do palpite de interface pai: 1) confirmado de
                 # verdade lendo o device (SSH extra no MikroTik, ver
