@@ -177,18 +177,55 @@ OID_IP_AD_ENT_NET_MASK = "1.3.6.1.2.1.4.20.1.3"
 def _snmp_cmd(binary, host, community, oid, timeout, retries):
     return [
         binary, "-v2c", "-c", community,
-        "-O", "qn",  # q = sem "Type:"/enum verboso na saída, n = OID numérico
+        # q = sem "Type:"/enum verboso na saída, n = OID numérico, a =
+        # força string OCTET STRING sempre como texto -- SEM o "a", o
+        # net-snmp troca sozinho pra "Hex-STRING" (ex: "46 75 74 75 72
+        # 65..." em vez de "Futuretec") sempre que a string tem um byte
+        # não-ASCII "imprimível" pro C locale -- e isso inclui QUALQUER
+        # acento (á/é/í/ó/ú/ç/ã/õ), então sys_name/ifAlias/comentário com
+        # acento (comuníssimo em português, ver bug reportado:
+        # "Futuretec_Escritório" saindo como hex) sempre vinha ilegível.
+        # Ver decode manual em snmp_get()/snmp_walk() abaixo -- precisa
+        # andar junto com essa flag, porque o byte cru do acento (ex:
+        # 0xF3 sozinho) não é UTF-8 válido, e sem o fallback de encoding
+        # o subprocess.run(text=True) padrão quebraria com
+        # UnicodeDecodeError em vez de só devolver a string certa.
+        "-O", "qna",
         "-t", str(timeout), "-r", str(retries),
         host, oid,
     ]
 
 
+def _decode_snmp_bytes(raw):
+    """Decodifica a saída crua (bytes) do snmpget/snmpwalk. Tenta UTF-8
+    primeiro (a maioria dos devices já manda certo); se não for UTF-8
+    válido, cai pra Latin-1 (ISO-8859-1, o encoding mais comum pra
+    texto com acento em firmware de rede mais antigo/RouterOS) -- e só
+    se nem isso decodificar (não deveria acontecer, Latin-1 aceita
+    qualquer byte 0x00-0xFF), substitui os bytes problemáticos em vez
+    de quebrar a coleta inteira por causa de um sys_name/comentário mal
+    formado."""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            return raw.decode("latin-1")
+        except UnicodeDecodeError:
+            return raw.decode("utf-8", errors="replace")
+
+
 def snmp_get(host, community, oid, timeout=5, retries=1):
     cmd = _snmp_cmd("snmpget", host, community, oid, timeout, retries)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * (retries + 1) + 5)
+    # text=False (padrão) -- pega bytes crus e decodifica na mão via
+    # _decode_snmp_bytes() com fallback UTF-8/Latin-1 (ver comentário
+    # em _snmp_cmd()). Com text=True o Python decodifica direto como
+    # UTF-8 estrito (ou o encoding do locale do container) e QUEBRA com
+    # UnicodeDecodeError assim que aparece um acento em Latin-1 (ex:
+    # sys_name "Futuretec_Escritório" com o 'ó' cru).
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout * (retries + 1) + 5)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "snmpget falhou (sem stderr)")
-    line = result.stdout.strip()
+        raise RuntimeError(_decode_snmp_bytes(result.stderr).strip() or "snmpget falhou (sem stderr)")
+    line = _decode_snmp_bytes(result.stdout).strip()
     if not line:
         return None
     _, _, value = line.partition(" ")
@@ -198,11 +235,11 @@ def snmp_get(host, community, oid, timeout=5, retries=1):
 def snmp_walk(host, community, oid, timeout=5, retries=1):
     """Retorna dict {indice_da_tabela: valor} a partir de um walk."""
     cmd = _snmp_cmd("snmpwalk", host, community, oid, timeout, retries)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * (retries + 1) + 15)
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout * (retries + 1) + 15)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "snmpwalk falhou (sem stderr)")
+        raise RuntimeError(_decode_snmp_bytes(result.stderr).strip() or "snmpwalk falhou (sem stderr)")
     out = {}
-    for line in result.stdout.splitlines():
+    for line in _decode_snmp_bytes(result.stdout).splitlines():
         line = line.strip()
         if not line:
             continue
@@ -220,11 +257,11 @@ def _snmp_walk_ip_indexed(host, community, base_oid, timeout=5, retries=1):
     de '10.0.0.1') -- aqui pegamos os 4 últimos componentes (o IPv4
     completo) como chave."""
     cmd = _snmp_cmd("snmpwalk", host, community, base_oid, timeout, retries)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * (retries + 1) + 15)
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout * (retries + 1) + 15)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "snmpwalk falhou (sem stderr)")
+        raise RuntimeError(_decode_snmp_bytes(result.stderr).strip() or "snmpwalk falhou (sem stderr)")
     out = {}
-    for line in result.stdout.splitlines():
+    for line in _decode_snmp_bytes(result.stdout).splitlines():
         line = line.strip()
         if not line:
             continue
