@@ -523,6 +523,40 @@ def _build_row(d):
         elif method == "snmp":
             not_ready_reason = "Falta a community (SNMP)."
 
+    # Texto/cor do badge SSH e SNMP mostrados direto na coluna Status
+    # (que absorveu a antiga coluna Conectividade -- ver _device_row.html
+    # e a conversa que definiu essas mensagens exatas). Prioridade:
+    # 1) credencial incompleta (diz especificamente o que falta, sem
+    #    nem tentar testar -- username primeiro, senha depois) --
+    # 2) credencial completa e testada (ok/erro, ver
+    #    test_ssh_connectivity()/test_snmp_connectivity() em
+    #    discovery_core.py, disparado em _apply_discovery_form()) --
+    # 3) fallback neutro (credencial completa mas ainda sem teste
+    #    registrado -- não deveria acontecer na prática, já que o teste
+    #    roda sozinho assim que os dois campos ficam completos, mas
+    #    cobre o caso de dado criado por fora desse app, ex: script/CLI).
+    if not cf.get("discovery_username"):
+        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-red-lt", "Sem usuário informado.", ""
+    elif not has_ssh_cred_pair:
+        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-red-lt", "Sem senha informada.", ""
+    elif cf.get("discovery_ssh_status") == "ok":
+        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-success-lt", "SSH OK.", ""
+    elif cf.get("discovery_ssh_status") == "error":
+        ssh_badge_cls, ssh_badge_text = "bg-red-lt", "Usuário/Senha inválidos."
+        ssh_badge_tooltip = cf.get("discovery_ssh_status_detail") or ""
+    else:
+        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-secondary-lt", "Aguardando teste.", ""
+
+    if not cf.get("discovery_snmp_community"):
+        snmp_badge_cls, snmp_badge_text, snmp_badge_tooltip = "bg-red-lt", "Sem community", ""
+    elif cf.get("discovery_snmp_status") == "ok":
+        snmp_badge_cls, snmp_badge_text, snmp_badge_tooltip = "bg-success-lt", "SNMP OK.", ""
+    elif cf.get("discovery_snmp_status") == "error":
+        snmp_badge_cls, snmp_badge_text = "bg-red-lt", "Sem resposta SNMP."
+        snmp_badge_tooltip = cf.get("discovery_snmp_status_detail") or ""
+    else:
+        snmp_badge_cls, snmp_badge_text, snmp_badge_tooltip = "bg-secondary-lt", "Aguardando teste.", ""
+
     return {
         "id": d.id,
         "name": d.name,
@@ -549,6 +583,12 @@ def _build_row(d):
         "ssh_status_detail": cf.get("discovery_ssh_status_detail") or "",
         "snmp_status": cf.get("discovery_snmp_status") or "",
         "snmp_status_detail": cf.get("discovery_snmp_status_detail") or "",
+        "ssh_badge_cls": ssh_badge_cls,
+        "ssh_badge_text": ssh_badge_text,
+        "ssh_badge_tooltip": ssh_badge_tooltip,
+        "snmp_badge_cls": snmp_badge_cls,
+        "snmp_badge_text": snmp_badge_text,
+        "snmp_badge_tooltip": snmp_badge_tooltip,
         # Platform (override opcional de device_type) só é obrigatório
         # quando o método envolve SSH ("ssh" ou "both") -- SNMP puro não precisa.
         "ready": bool(method and has_cred and d.primary_ip4 and (method not in ("ssh", "both") or platform_resolved)),

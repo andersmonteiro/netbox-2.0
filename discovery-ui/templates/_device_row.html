@@ -35,9 +35,6 @@
     </select>
   </td>
   <td>
-    <span class="region-val text-secondary">{{ r.region or "—" }}</span>
-  </td>
-  <td>
     <span class="view-val text-secondary">{{ r.manufacturer or "—" }}</span>
     <select class="edit-val form-select form-select-sm" style="display:none">
       <option value="">— selecione —</option>
@@ -49,23 +46,6 @@
   <td>
     <span class="view-val text-secondary">{{ r.primary_ip or "—" }}</span>
     <input type="text" class="edit-val form-control form-control-sm" value="{{ r.primary_ip or '' }}" style="display:none">
-  </td>
-  <td class="proto-cell">
-    {# Estilo Zabbix: SSH e SNMP aparecem SEMPRE, sem seleção manual --
-       o método (usado só pro badge "Status"/pronto, ver
-       app.py:_build_row) é derivado sozinho a partir de quais
-       credenciais estão preenchidas (ver app.py:_apply_discovery_form).
-       Cinza = ainda sem credencial preenchida pra esse protocolo;
-       verde = testado e comunicável (checagem rápida REAL, ver
-       test_ssh_connectivity()/test_snmp_connectivity() em
-       discovery_core.py); vermelho = testado e falhou (credencial
-       errada ou inalcançável) -- passa o mouse pro motivo. O teste
-       roda de novo sozinho sempre que o operador salva uma edição que
-       mudou a credencial daquele protocolo (ou o IP). #}
-    <span class="badge badge-method {{ 'bg-success-lt' if r.ssh_status == 'ok' else ('bg-red-lt' if r.ssh_status == 'error' else 'bg-secondary-lt') }}"
-      {% if r.ssh_status_detail %}title="{{ r.ssh_status_detail }}"{% endif %}>SSH</span>
-    <span class="badge badge-method {{ 'bg-success-lt' if r.snmp_status == 'ok' else ('bg-red-lt' if r.snmp_status == 'error' else 'bg-secondary-lt') }}"
-      {% if r.snmp_status_detail %}title="{{ r.snmp_status_detail }}"{% endif %}>SNMP</span>
   </td>
   <td>
     <span class="view-val text-secondary">{{ r.cf_username or "—" }}</span>
@@ -83,12 +63,17 @@
     <span class="view-val text-secondary">{{ r.cf_snmp_community or "—" }}</span>
     <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_snmp_community }}" style="display:none" autocomplete="off">
   </td>
-  <td>
-    {% if r.ready %}
-      <span class="badge bg-success-lt text-uppercase"><i class="ti ti-circle-check me-1"></i>pronto</span>
-    {% else %}
-      <span class="badge bg-red-lt text-uppercase" title="{{ r.not_ready_reason or '' }}"><i class="ti ti-circle-x me-1"></i>incompleto{% if r.not_ready_reason %} <i class="ti ti-info-circle ms-1"></i>{% endif %}</span>
-    {% endif %}
+  <td class="proto-cell">
+    {# Coluna Status mesclada com a antiga Conectividade: mostra SSH e
+       SNMP sempre, com o motivo do vermelho direto no texto do badge
+       (sem precisar passar o mouse pra entender) -- ver regras exatas
+       e mensagens em app.py:_build_row(). Detalhe técnico completo
+       (ex: mensagem de erro do teste real de conectividade) continua
+       disponível via tooltip no hover, quando existir. #}
+    <div class="d-flex flex-column gap-1">
+      <span class="badge {{ r.ssh_badge_cls }}" {% if r.ssh_badge_tooltip %}title="{{ r.ssh_badge_tooltip }}"{% endif %}>SSH: {{ r.ssh_badge_text }}</span>
+      <span class="badge {{ r.snmp_badge_cls }}" {% if r.snmp_badge_tooltip %}title="{{ r.snmp_badge_tooltip }}"{% endif %}>SNMP: {{ r.snmp_badge_text }}</span>
+    </div>
   </td>
   <td class="text-nowrap">
     {# Edição em lote (ver setRowEditMode()/wireRow() em dashboard.html):
