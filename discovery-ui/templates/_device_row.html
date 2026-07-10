@@ -35,13 +35,7 @@
     </select>
   </td>
   <td>
-    {# Região não é um campo do device no NetBox -- é herdado do Site
-       (ver comentário no <th> de dashboard.html). Não dá pra editar
-       direto aqui, mas clicar abre a edição do Site (célula anterior),
-       que é o campo que de fato determina a região -- ver wireRow() em
-       dashboard.html, que faz esse span disparar o clique no view-val
-       do Site. #}
-    <span class="region-val click-edit text-secondary" tabindex="0" title="Clique para trocar (edita o Site)">{{ r.region or "—" }}</span>
+    <span class="region-val text-secondary">{{ r.region or "—" }}</span>
   </td>
   <td>
     <span class="view-val click-edit text-secondary" tabindex="0">{{ r.manufacturer or "—" }}</span>
