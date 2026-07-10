@@ -1762,18 +1762,22 @@ def set_primary_ip(nb, device, ip_str):
 
 
 def set_discovery_fields(device, method, discovery_username=None, discovery_password=None, discovery_snmp_community=None, discovery_ssh_port=None):
-    """Grava discovery_method + a credencial correspondente nos custom
+    """Grava discovery_method + as credenciais recebidas nos custom
     fields do device (mesmos campos criados por create_discovery_fields.py).
 
-    username/password/ssh_port são gravados pra method="ssh" (uso normal),
-    method="both" (uso normal, SSH é metade da coleta) e também pra
-    method="snmp" (uso opcional: credencial SSH extra só pra confirmar o
-    vínculo VLAN -> porta física e o comentário real em devices MikroTik,
-    ver collect_snmp()/collect_mikrotik_interface_details() -- se o
-    operador não preencher nada aqui num device SNMP, esses campos
-    continuam vazios e a coleta segue 100% via SNMP, sem essa checagem
-    extra). discovery_snmp_community é gravado pra method="snmp" e
-    method="both".
+    Cada campo é gravado sempre que vier preenchido (não None),
+    INDEPENDENTE do method calculado -- method é só um resumo derivado
+    de quais credenciais já estão completas (ver
+    app.py:_apply_discovery_form), não um portão de quais campos podem
+    ser salvos. ANTES essa gravação era condicionada a
+    method in ("ssh", "snmp", "both"): preencher só o usuário (sem
+    senha ainda -- ex: host novo, editando campo por campo) fazia
+    method sair None (SSH só conta como "completo" com usuário E senha
+    juntos) e o usuário digitado nunca era gravado, mesmo a requisição
+    dando certo -- a linha recarregava sem o que foi digitado, parecendo
+    um refresh que "comeu" o campo. Preencher a community primeiro
+    "destravava" porque sozinha já fecha method="snmp", que então
+    liberava a gravação de tudo, inclusive o usuário pendente.
 
     discovery_password é cifrado (ver encrypt_secret) antes de gravar --
     o NetBox guarda só o texto cifrado no custom field, nunca a senha em
@@ -1781,16 +1785,14 @@ def set_discovery_fields(device, method, discovery_username=None, discovery_pass
     de fato usa a senha pra conectar (collect_device())."""
     cf = dict(device.custom_fields or {})
     cf["discovery_method"] = method
-    if method in ("ssh", "snmp", "both"):
-        if discovery_username is not None:
-            cf["discovery_username"] = discovery_username
-        if discovery_password is not None:
-            cf["discovery_password"] = encrypt_secret(discovery_password)
-        if discovery_ssh_port is not None:
-            cf["discovery_ssh_port"] = discovery_ssh_port
-    if method in ("snmp", "both"):
-        if discovery_snmp_community is not None:
-            cf["discovery_snmp_community"] = discovery_snmp_community
+    if discovery_username is not None:
+        cf["discovery_username"] = discovery_username
+    if discovery_password is not None:
+        cf["discovery_password"] = encrypt_secret(discovery_password)
+    if discovery_ssh_port is not None:
+        cf["discovery_ssh_port"] = discovery_ssh_port
+    if discovery_snmp_community is not None:
+        cf["discovery_snmp_community"] = discovery_snmp_community
     device.update({"custom_fields": cf})
     return device
 
