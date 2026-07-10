@@ -69,7 +69,7 @@
             <th class="w-1"><input type="checkbox" class="form-check-input m-0" id="select-all-cb"></th>
             <th>Nome <i class="ti ti-info-circle text-secondary" title="Nome do device"></i></th>
             <th>Site <i class="ti ti-info-circle text-secondary" title="Onde o device está instalado"></i></th>
-            <th>Região <i class="ti ti-info-circle text-secondary" title="Vem do Site escolhido -- não é editável direto aqui"></i></th>
+            <th>Região <i class="ti ti-info-circle text-secondary" title="Vem do Site escolhido -- clique na célula da linha pra trocar (abre a edição do Site)"></i></th>
             <th>Fabricante <i class="ti ti-info-circle text-secondary" title="Fabricante e modelo do device (Device Type)"></i></th>
             <th>IP de gerência <i class="ti ti-info-circle text-secondary" title="IP usado pra conectar e coletar dados do device"></i></th>
             <th>Conectividade <i class="ti ti-info-circle text-secondary" title="SSH e SNMP -- cinza enquanto não há credencial preenchida, verde quando testado e comunicável, vermelho quando testado e falhou (credencial errada ou inalcançável). Basta preencher usuário/senha/porta (SSH) e/ou community (SNMP) que o teste roda sozinho; não precisa escolher método manualmente"></i></th>
@@ -344,6 +344,21 @@
         var opt = siteSelect.selectedOptions[0];
         regionVal.textContent = (opt && opt.dataset.region) ? opt.dataset.region : '—';
       });
+    }
+    // Região não é campo do device (é herdado do Site, ver comentário no
+    // <th> acima) -- não dá pra editar direto, mas clicar na célula abre
+    // a edição do Site (célula anterior), que é o campo que de fato
+    // determina a região. Sem isso o operador clicava na Região esperando
+    // poder trocar e nada acontecia.
+    if (regionVal) {
+      var openSiteEdit = function (e) {
+        if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+        if (e.type === 'keydown') e.preventDefault();
+        var siteView = tr.querySelector('td:nth-child(3) .view-val');
+        if (siteView) siteView.click();
+      };
+      regionVal.addEventListener('click', openSiteEdit);
+      regionVal.addEventListener('keydown', openSiteEdit);
     }
     // A célula de Conectividade (.proto-cell, ver _device_row.html) não
     // tem .view-val/.edit-val -- é só um par de badges estáticos
