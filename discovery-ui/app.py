@@ -537,7 +537,16 @@ def _build_row(d):
     #    registrado -- não deveria acontecer na prática, já que o teste
     #    roda sozinho assim que os dois campos ficam completos, mas
     #    cobre o caso de dado criado por fora desse app, ex: script/CLI).
-    if not cf.get("discovery_username"):
+    # Sem IP de gerência checado ANTES de tudo, pros dois protocolos --
+    # sem isso, um device que já foi testado com sucesso no passado e
+    # depois teve o IP removido/limpo continuava mostrando o status
+    # "ok" (cf.discovery_ssh_status/discovery_snmp_status) travado do
+    # último teste, porque esses campos são só um CACHE do resultado, e
+    # nada aqui invalidava esse cache quando o IP some (bug reportado:
+    # device sem IP aparecendo com SSH/SNMP verdes).
+    if not d.primary_ip4:
+        ssh_badge_cls, ssh_reason, ssh_detail = "bg-red-lt", "Sem IP de gerência.", ""
+    elif not cf.get("discovery_username"):
         ssh_badge_cls, ssh_reason, ssh_detail = "bg-red-lt", "Sem usuário informado.", ""
     elif not has_ssh_cred_pair:
         ssh_badge_cls, ssh_reason, ssh_detail = "bg-red-lt", "Sem senha informada.", ""
@@ -551,7 +560,9 @@ def _build_row(d):
     ssh_badge_text = "SSH"
     ssh_badge_tooltip = f"{ssh_reason} ({ssh_detail})" if ssh_detail else ssh_reason
 
-    if not cf.get("discovery_snmp_community"):
+    if not d.primary_ip4:
+        snmp_badge_cls, snmp_reason, snmp_detail = "bg-red-lt", "Sem IP de gerência.", ""
+    elif not cf.get("discovery_snmp_community"):
         snmp_badge_cls, snmp_reason, snmp_detail = "bg-red-lt", "Sem community", ""
     elif cf.get("discovery_snmp_status") == "ok":
         snmp_badge_cls, snmp_reason, snmp_detail = "bg-success-lt", "SNMP OK.", ""
