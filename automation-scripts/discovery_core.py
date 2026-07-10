@@ -950,23 +950,25 @@ def _collect_datacom(device, username, password, port=None):
     # Interfaces L3/SVI ("show running-config interface l3", ver
     # _datacom_parse_l3_interfaces() acima) -- entram como interfaces
     # NOVAS (nunca colidem com o padrão "<tipo>-X/Y/Z" das portas
-    # físicas acima). Nome gravado no NetBox = "<nome no device> (<vlan>)"
-    # (ex: "TESTE (1234)", "GERENCIA (1263)") -- a VLAN direto no nome
-    # ajuda a identificar de cara qual VLAN cada L3 usa, sem precisar
-    # abrir a interface. Descrição = só o nome cru que vem depois de
-    # "interface l3" no device (ex: "TESTE"), ou a descrição explícita
-    # do bloco se houver (ver _datacom_parse_l3_interfaces) -- e essa
-    # descrição é a mesma que vai pro IP no IPAM (ver
-    # apply_device_result). "type_hint": "virtual" força o tipo no
-    # NetBox pra "Virtual" (são interfaces lógicas roteadas, sem porta
-    # física própria) em vez de cair no chute por nome de
-    # guess_interface_type() (ver app.py:review(), que agora prioriza
-    # esse campo quando presente) -- um nome tipo "TESTE (1234)" não
+    # físicas acima). Nome gravado no NetBox = só a VLAN (ex: "1234",
+    # "1263") -- pedido explícito do usuário: o nome cru que o device dá
+    # à interface (ex: "TESTE", "GERENCIA") vai só na descrição, não no
+    # nome. Quando o bloco não tem "lower-layer-if vlan" (ex:
+    # "Gerencia-POP_CIDUN2", que vem vazio no device), usa o nome cru
+    # como fallback pra não perder a interface. Descrição = só o nome
+    # cru que vem depois de "interface l3" no device (ex: "TESTE"), ou a
+    # descrição explícita do bloco se houver (ver
+    # _datacom_parse_l3_interfaces) -- e essa descrição é a mesma que vai
+    # pro IP no IPAM (ver apply_device_result). "type_hint": "virtual"
+    # força o tipo no NetBox pra "Virtual" (são interfaces lógicas
+    # roteadas, sem porta física própria) em vez de cair no chute por
+    # nome de guess_interface_type() (ver app.py:review(), que agora
+    # prioriza esse campo quando presente) -- um nome tipo "1234" não
     # bate com nenhum padrão conhecido e cairia em "Outros" sem isso.
     for l3 in l3_interfaces:
         raw_name = l3["name"]
         vlan = l3.get("vlan")
-        display_name = f"{raw_name} ({vlan})" if vlan else raw_name
+        display_name = str(vlan) if vlan else raw_name
         if display_name in seen:
             continue
         seen.add(display_name)
