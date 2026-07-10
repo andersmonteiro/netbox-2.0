@@ -44,4 +44,4 @@ RUN mkdir -p discovery_output/applied discovery_output/discarded
 
 EXPOSE 5050
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "2
+CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "2", "--timeout", "120", "app:app"]
