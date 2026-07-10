@@ -282,9 +282,61 @@
        logo do navbar; aqui só a animação de giro. */
     @keyframes nbo-spin { to { transform: rotate(360deg); } }
     .nbo-spin-logo { animation: nbo-spin .9s linear infinite; flex-shrink: 0; display: block; }
+
+    /* Toast de confirmação (ver window.nboToast() abaixo) -- canto
+       inferior esquerdo, empilha se mais de um aparecer ao mesmo tempo
+       (ex: duas edições inline seguidas rápidas). position:fixed pra
+       não ser afetado pelo overflow de nenhum container/scroll da
+       página (mesmo raciocínio do antigo dropdown de Método, já
+       documentado em versões anteriores deste arquivo). */
+    #nbo-toast-stack {
+      position: fixed; left: 1rem; bottom: 1rem; z-index: 1080;
+      display: flex; flex-direction: column-reverse; gap: .5rem;
+      pointer-events: none;
+    }
+    .nbo-toast {
+      display: flex; align-items: center; gap: .5rem;
+      background: #16191c; border: 1px solid var(--nbo-border);
+      color: #fff; padding: .6rem .9rem; border-radius: var(--tblr-border-radius);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+      font-size: .875rem; max-width: 320px;
+      opacity: 0; transform: translateY(6px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    .nbo-toast.show { opacity: 1; transform: translateY(0); }
+    .nbo-toast .ti-circle-check { color: var(--nbo-accent); }
+    .nbo-toast .ti-circle-x { color: var(--tblr-red); }
+    [data-bs-theme=light] .nbo-toast {
+      background: #ffffff; color: #04070a; border-color: rgba(0,0,0,.14);
+    }
   </style>
 </head>
 <body>
+  <div id="nbo-toast-stack" aria-live="polite"></div>
+  <script>
+    // Helper global (chamado de dashboard.html/review.html) -- monta um
+    // toast simples no canto inferior esquerdo, some sozinho depois de
+    // alguns segundos. Usado hoje pra confirmar uma edição inline salva
+    // (ver saveRow() em dashboard.html), no lugar de só trocar a linha
+    // silenciosamente -- que sem esse aviso parecia "sumir" a mudança.
+    window.nboToast = function (message, opts) {
+      opts = opts || {};
+      var stack = document.getElementById('nbo-toast-stack');
+      if (!stack) return;
+      var el = document.createElement('div');
+      el.className = 'nbo-toast';
+      var icon = opts.type === 'error' ? 'ti-circle-x' : 'ti-circle-check';
+      el.innerHTML = '<i class="ti ' + icon + '"></i><span></span>';
+      el.querySelector('span').textContent = message;
+      stack.appendChild(el);
+      requestAnimationFrame(function () { el.classList.add('show'); });
+      var ms = opts.duration || 3000;
+      setTimeout(function () {
+        el.classList.remove('show');
+        setTimeout(function () { el.remove(); }, 200);
+      }, ms);
+    };
+  </script>
   <div class="page">
     <header class="navbar navbar-expand-md navbar-dark d-print-none">
       <!-- container-fluid (não container-xl) -- container-xl tem largura
