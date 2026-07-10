@@ -492,6 +492,41 @@ aparece no resumo final. Detalhes de uso da interface (dashboard,
 cadastro de device, revisão/aprovação) estão na seção 2.4, é a mesma
 tela.
 
+**Esqueci a senha do NetBox Oracle**: primeiro veja se ela já foi
+trocada pela tela "Alterar senha" em algum momento (fica salva num
+hash de mão única, não reversível):
+
+```bash
+cat /opt/netbox-2.0/automation-scripts/discovery_output/_oracle/settings.json
+```
+
+Se não tiver a chave `ui_password_hash` (ou o arquivo nem existir), a
+senha atual é a que está no `.env.discovery-ui` — só ver o valor:
+
+```bash
+grep DISCOVERY_UI_PASSWORD /opt/netbox-2.0/.env.discovery-ui
+```
+
+Se `ui_password_hash` estiver preenchido, essa senha foi trocada pela
+UI e não tem como "revelar" — só resetar. O comando abaixo remove a
+senha trocada (sem precisar reiniciar o container) e volta a valer a
+do `.env.discovery-ui`:
+
+```bash
+docker exec netbox-oracle python3 -c "
+import json
+p = '/app/discovery_output/_oracle/settings.json'
+data = json.load(open(p))
+data.pop('ui_password_hash', None)
+json.dump(data, open(p, 'w'), indent=2, ensure_ascii=False)
+print('ok, senha resetada pra do .env')
+"
+```
+
+Depois entra com o usuário/senha do `.env.discovery-ui` (comando do
+`grep` acima) e, se quiser, já troca pra uma senha memorável em
+Configurações > Alterar senha.
+
 **Cliente com IPAM já preenchido**: se o NetBox do cliente já tem IPs
 cadastrados de antes (comum — endereço de gerência já documentado com
 outro prefixo, ex: um `/30` de um link, ou já associado a outro device/
