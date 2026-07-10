@@ -31,6 +31,7 @@ DISCOVERY_UI_PASSWORD, FLASK_SECRET_KEY, SNMP_TIMEOUT, SNMP_RETRIES
 import json
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -693,20 +694,43 @@ def _apply_discovery_form(nb, device, form):
         ssh_status = ssh_status_detail = None
         snmp_status = snmp_status_detail = None
 
+        # SSH e SNMP rodam em paralelo (threads) quando os DOIS precisam
+        # ser retestados na mesma edição (ex: trocou o IP de gerência) --
+        # cada teste é I/O puro (socket/subprocess, libera o GIL), então
+        # rodar junto corta o pior caso de "soma dos dois timeouts" (até
+        # uns 9s em sequência) pra "o maior dos dois" (uns 6s) -- sentido
+        # como demora perceptível a menos numa edição inline, que devia
+        # parecer rápida (ver reclamação de "fica parecendo que recarregou
+        # a página" -- essa espera parada, sem nenhum aviso, era a causa
+        # principal disso).
+        def _run_ssh_test():
+            nonlocal ssh_status, ssh_status_detail
+            final_password_plain = new_password_raw or core.decrypt_secret(cf_before.get("discovery_password"))
+            ok, detail = core.test_ssh_connectivity(device, final_username, final_password_plain, final_ssh_port)
+            ssh_status, ssh_status_detail = ("ok" if ok else "error"), detail
+
+        def _run_snmp_test():
+            nonlocal snmp_status, snmp_status_detail
+            ok, detail = core.test_snmp_connectivity(device, final_community)
+            snmp_status, snmp_status_detail = ("ok" if ok else "error"), detail
+
+        threads = []
         if has_ssh:
             if ssh_fields_changed or never_tested_ssh:
-                final_password_plain = new_password_raw or core.decrypt_secret(cf_before.get("discovery_password"))
-                ok, detail = core.test_ssh_connectivity(device, final_username, final_password_plain, final_ssh_port)
-                ssh_status, ssh_status_detail = ("ok" if ok else "error"), detail
+                threads.append(threading.Thread(target=_run_ssh_test))
         elif cf_before.get("discovery_ssh_status"):
             ssh_status, ssh_status_detail = "", ""
 
         if has_snmp:
             if snmp_fields_changed or never_tested_snmp:
-                ok, detail = core.test_snmp_connectivity(device, final_community)
-                snmp_status, snmp_status_detail = ("ok" if ok else "error"), detail
+                threads.append(threading.Thread(target=_run_snmp_test))
         elif cf_before.get("discovery_snmp_status"):
             snmp_status, snmp_status_detail = "", ""
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
         if ssh_status is not None or snmp_status is not None:
             core.set_connectivity_status(
