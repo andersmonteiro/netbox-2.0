@@ -37,3 +37,13 @@ services:
       - "5050:5050"
     volumes:
       - ./automation-scripts/discovery_output:/app/discovery_output
+      # Socket do Docker do HOST -- usado só pela aba "Serviços" do navbar
+      # (status ligado/parado dos containers do NetBox + botão de
+      # reiniciar, ver /api/services/* em discovery-ui/app.py). ATENÇÃO:
+      # isso dá ao container acesso equivalente a root no Docker da
+      # máquina (não só sobre os containers do NetBox) -- é assim que
+      # containerizar um painel de controle de containers funciona, não
+      # tem meio-termo. Se não quiser essa exposição, comente esta linha;
+      # a aba de Serviços cai sozinha pra "indisponível" sem quebrar o
+      # resto da aplicação (ver _get_docker_client() em app.py).
+      - /var/run/docker.sock:/var/run/docker.sock

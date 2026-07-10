@@ -36,6 +36,8 @@ from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 
+import docker
+from docker.errors import DockerException, NotFound
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 from markupsafe import Markup, escape
@@ -55,6 +57,14 @@ UI_USER = os.environ.get("DISCOVERY_UI_USER", "admin")
 UI_PASSWORD = os.environ.get("DISCOVERY_UI_PASSWORD", "")
 SNMP_TIMEOUT = int(os.environ.get("SNMP_TIMEOUT", "5"))
 SNMP_RETRIES = int(os.environ.get("SNMP_RETRIES", "1"))
+# Filtro de nome usado pela aba "Serviços" (status/reinício de containers,
+# ver _list_service_containers()/_get_docker_client() mais abaixo) --
+# só entram containers cujo nome CONTÉM esse texto (case-insensitive).
+# "netbox" cobre tanto a instalação completa (netbox, netbox-worker,
+# postgres, redis, redis-cache -- nomeados "netbox-docker-<serviço>-N"
+# pelo Compose) quanto o container do próprio netbox-oracle. Vazio
+# ("") mostraria TODOS os containers do host, não só os do NetBox.
+SERVICE_NAME_FILTER = os.environ.get("ORACLE_SERVICE_FILTER", "netbox")
 
 OUTPUT_DIR = Path(__file__).parent / "discovery_output"
 APPLIED_DIR = OUTPUT_DIR / "applied"
@@ -152,7 +162,10 @@ def login_required(view):
 
 # Rotas que não dependem do NetBox estar configurado (senão a gente
 # criaria um loop de redirect pra /settings).
-_NETBOX_INDEPENDENT_ENDPOINTS = {"login", "logout", "settings_view", "api_status", "change_password", "static"}
+_NETBOX_INDEPENDENT_ENDPOINTS = {
+    "login", "logout", "settings_view", "api_status", "change_password", "static",
+    "services_status", "service_restart",
+}
 
 
 @app.before_request
@@ -260,6 +273,91 @@ def api_status():
         if "403" in msg or "forbidden" in low or "token" in low or "401" in msg:
             return {"status": "unauthorized", "detail": "Token inválido ou sem permissão"}
         return {"status": "offline", "detail": msg[:200]}
+
+
+# --------------------------------------------------------------------
+# status dos serviços (containers Docker do host) + reinício
+# --------------------------------------------------------------------
+# Igual em espírito ao status da API acima (badge com bolinha verde/
+# vermelha no navbar) -- só que em vez de testar a API do NetBox, lista
+# os containers do host via socket do Docker montado em
+# /var/run/docker.sock (ver volume em docker-compose.*.yml). Client é
+# lazy + cacheado num módulo global: se o socket não estiver montado
+# (ex: quem não quis expor essa permissão, ver comentário no compose),
+# a conexão falha UMA vez, guardamos o motivo, e toda chamada seguinte
+# devolve "indisponível" direto sem tentar de novo a cada request.
+_docker_client = None
+_docker_unavailable_reason = None
+
+
+def _get_docker_client():
+    global _docker_client, _docker_unavailable_reason
+    if _docker_client is not None:
+        return _docker_client
+    if _docker_unavailable_reason is not None:
+        return None
+    try:
+        client = docker.DockerClient(base_url="unix://var/run/docker.sock")
+        client.ping()
+    except DockerException as exc:
+        _docker_unavailable_reason = str(exc)
+        return None
+    except Exception as exc:
+        _docker_unavailable_reason = str(exc)
+        return None
+    _docker_client = client
+    return client
+
+
+def _in_service_scope(name):
+    needle = SERVICE_NAME_FILTER.strip().lower()
+    return (not needle) or (needle in name.lower())
+
+
+def _list_service_containers():
+    client = _get_docker_client()
+    if client is None:
+        return None
+    containers = []
+    for c in client.containers.list(all=True):
+        if not _in_service_scope(c.name):
+            continue
+        containers.append({"name": c.name, "status": c.status})
+    containers.sort(key=lambda x: x["name"])
+    return containers
+
+
+@app.route("/api/services/status")
+@login_required
+def services_status():
+    containers = _list_service_containers()
+    if containers is None:
+        return {"available": False, "error": _docker_unavailable_reason or "Docker indisponível"}
+    running = sum(1 for c in containers if c["status"] == "running")
+    return {"available": True, "containers": containers, "total": len(containers), "running": running}
+
+
+@app.route("/api/services/<path:name>/restart", methods=["POST"])
+@login_required
+def service_restart(name):
+    client = _get_docker_client()
+    if client is None:
+        return {"ok": False, "error": _docker_unavailable_reason or "Docker indisponível"}, 503
+    # Reforço além do filtro por nome já aplicado na listagem -- mesmo
+    # que alguém chame esse endpoint direto (fora do dropdown), só deixa
+    # reiniciar container dentro do escopo do NetBox, nunca qualquer
+    # container do host (o socket já dá acesso total ao Docker, mas essa
+    # rota especificamente fica restrita ao que a própria UI mostra).
+    if not _in_service_scope(name):
+        return {"ok": False, "error": "Container fora do escopo permitido."}, 403
+    try:
+        container = client.containers.get(name)
+        container.restart(timeout=10)
+        return {"ok": True}
+    except NotFound:
+        return {"ok": False, "error": "Container não encontrado."}, 404
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}, 500
 
 
 # --------------------------------------------------------------------

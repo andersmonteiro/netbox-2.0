@@ -20,3 +20,10 @@ python-dotenv>=1.0
 # fica explícito aqui por clareza e pra não depender de um detalhe de
 # implementação de outra lib continuar puxando ela no futuro.
 cryptography>=42
+# Aba "Serviços" do navbar (status ligado/parado + botão de reiniciar dos
+# containers do NetBox) -- fala com o Docker do host via socket montado
+# em /var/run/docker.sock (ver _get_docker_client() em app.py e o
+# volume no docker-compose.*.yml). Se o socket não estiver montado, o
+# client falha ao conectar e a aba cai pra "indisponível" sem quebrar o
+# resto da aplicação.
+docker>=7.0

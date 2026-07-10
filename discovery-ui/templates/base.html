@@ -309,6 +309,25 @@
     [data-bs-theme=light] .nbo-toast {
       background: #ffffff; color: #04070a; border-color: rgba(0,0,0,.14);
     }
+
+    /* Dropdown de "Serviços" (status/reinício dos containers do NetBox no
+       navbar, ver #svc-status-* abaixo) -- mesma ideia visual do dropdown
+       de status da API (bolinha colorida + texto), só que com uma lista
+       de containers dentro em vez de um único link de Configurações. */
+    .nbo-svc-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: .5rem; padding: .25rem .75rem; font-size: .8125rem;
+    }
+    .nbo-svc-row .nbo-svc-name-wrap { display: flex; align-items: center; min-width: 0; }
+    .nbo-svc-row .nbo-svc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nbo-svc-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; flex-shrink: 0; }
+    .nbo-svc-restart-btn {
+      border: none; background: transparent; color: var(--nbo-text-muted);
+      padding: 2px 5px; line-height: 1; border-radius: 4px; cursor: pointer; flex-shrink: 0;
+    }
+    .nbo-svc-restart-btn:hover:not(:disabled) { color: var(--nbo-accent); background: rgba(var(--nbo-accent-rgb), .12); }
+    .nbo-svc-restart-btn:disabled { opacity: .4; cursor: default; }
+    .nbo-svc-restart-btn.spinning i { animation: nbo-spin .7s linear infinite; display: inline-block; }
   </style>
 </head>
 <body>
@@ -391,6 +410,19 @@
         </ul>
 
         <div class="ms-auto navbar-actions" style="display:table !important; height:2.5rem !important;">
+          <div class="nav-item dropdown" style="display:table-cell !important; vertical-align:middle !important; padding-right:.75rem;">
+            <a href="#" class="nav-link" data-bs-toggle="dropdown" title="Status dos serviços (containers do NetBox)"
+               style="display:inline-block !important; vertical-align:middle !important; line-height:1 !important;">
+              <span id="svc-status-badge" class="badge bg-secondary-lt" style="vertical-align:middle !important;">
+                <span id="svc-status-dot" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#888;margin-right:6px;vertical-align:middle;"></span>
+                <span id="svc-status-text" style="vertical-align:middle;">verificando…</span>
+              </span>
+            </a>
+            <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow" style="min-width: 260px;">
+              <span class="dropdown-header">Serviços</span>
+              <div id="svc-status-list" class="px-3 py-2 text-secondary" style="font-size:.8125rem;">carregando…</div>
+            </div>
+          </div>
           <div class="nav-item dropdown" style="display:table-cell !important; vertical-align:middle !important; padding-right:.75rem;">
             <a href="#" class="nav-link" data-bs-toggle="dropdown" title="Status da API do NetBox"
                style="display:inline-block !important; vertical-align:middle !important; line-height:1 !important;">
@@ -503,6 +535,106 @@
           .then(function (d) { paint(d.status); })
           .catch(function () { paint('offline'); });
       }
+      check();
+      setInterval(check, 30000);
+    })();
+  </script>
+  <script>
+    // Status/reinício dos containers do NetBox (aba "Serviços" no navbar,
+    // ver /api/services/status e /api/services/<nome>/restart em
+    // app.py). Mesmo padrão do bloco de status da API logo acima
+    // (bolinha colorida + polling a cada 30s), só que a bolinha aqui
+    // reflete o PIOR container do grupo (nenhum rodando = vermelho,
+    // algum parado = amarelo, todos rodando = verde) e o dropdown lista
+    // cada container com um botão de reiniciar.
+    (function () {
+      var dot = document.getElementById('svc-status-dot');
+      var text = document.getElementById('svc-status-text');
+      var badge = document.getElementById('svc-status-badge');
+      var list = document.getElementById('svc-status-list');
+      if (!dot || !list) return;
+
+      var RESTART_URL_TEMPLATE = '{{ url_for("service_restart", name="__NAME__") }}';
+
+      function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : s;
+        return d.innerHTML;
+      }
+
+      function paintSummary(data) {
+        if (!data || !data.available) {
+          dot.style.background = '#888';
+          text.textContent = 'indisponível';
+          badge.className = 'badge bg-secondary-lt';
+          return;
+        }
+        var allUp = data.total > 0 && data.running === data.total;
+        var noneUp = data.running === 0;
+        dot.style.background = allUp ? '#00f2d4' : (noneUp ? '#e24b4a' : '#f0a060');
+        badge.className = 'badge ' + (allUp ? 'bg-teal-lt' : (noneUp ? 'bg-danger-lt' : 'bg-warning-lt'));
+        text.textContent = data.running + '/' + data.total + ' online';
+      }
+
+      function renderList(data) {
+        if (!data || !data.available) {
+          list.innerHTML = '<div>Docker indisponível' + (data && data.error ? ' (' + escapeHtml(data.error) + ')' : '') + '.</div>';
+          return;
+        }
+        if (!data.containers.length) {
+          list.innerHTML = '<div>Nenhum container encontrado.</div>';
+          return;
+        }
+        list.innerHTML = '';
+        data.containers.forEach(function (c) {
+          var color = c.status === 'running' ? '#00f2d4' : (c.status === 'restarting' ? '#f0a060' : '#e24b4a');
+          var row = document.createElement('div');
+          row.className = 'nbo-svc-row';
+          row.innerHTML =
+            '<span class="nbo-svc-name-wrap">' +
+              '<span class="nbo-svc-dot" style="background:' + color + ';"></span>' +
+              '<span class="nbo-svc-name" title="' + escapeHtml(c.name) + ' (' + escapeHtml(c.status) + ')">' + escapeHtml(c.name) + '</span>' +
+            '</span>' +
+            '<button type="button" class="nbo-svc-restart-btn" title="Reiniciar" data-name="' + escapeHtml(c.name) + '">' +
+              '<i class="ti ti-refresh"></i>' +
+            '</button>';
+          list.appendChild(row);
+        });
+      }
+
+      function check() {
+        fetch('{{ url_for("services_status") }}')
+          .then(function (r) { return r.json(); })
+          .then(function (d) { paintSummary(d); renderList(d); })
+          .catch(function () {
+            paintSummary({ available: false });
+            renderList({ available: false, error: 'falha ao consultar' });
+          });
+      }
+
+      list.addEventListener('click', function (e) {
+        var btn = e.target.closest('.nbo-svc-restart-btn');
+        if (!btn || btn.disabled) return;
+        var name = btn.dataset.name;
+        btn.disabled = true;
+        btn.classList.add('spinning');
+        fetch(RESTART_URL_TEMPLATE.replace('__NAME__', encodeURIComponent(name)), { method: 'POST' })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+          .then(function (res) {
+            if (res.ok && res.body.ok) {
+              if (window.nboToast) window.nboToast(name + ' reiniciado.');
+            } else {
+              if (window.nboToast) window.nboToast('Erro ao reiniciar ' + name + ': ' + (res.body.error || 'falha desconhecida'), { type: 'error' });
+            }
+            check();
+          })
+          .catch(function (err) {
+            if (window.nboToast) window.nboToast('Erro de rede ao reiniciar ' + name + ': ' + err, { type: 'error' });
+            btn.disabled = false;
+            btn.classList.remove('spinning');
+          });
+      });
+
       check();
       setInterval(check, 30000);
     })();
