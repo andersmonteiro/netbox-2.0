@@ -69,10 +69,8 @@
        falhou) -- o motivo específico de estar vermelho/verde só
        aparece ao passar o mouse (title), sem poluir a célula com texto
        -- ver regras exatas e mensagens em app.py:_build_row(). #}
-    <div class="d-flex flex-column gap-1">
-      <span class="badge {{ r.ssh_badge_cls }}" title="{{ r.ssh_badge_tooltip }}">{{ r.ssh_badge_text }}</span>
-      <span class="badge {{ r.snmp_badge_cls }}" title="{{ r.snmp_badge_tooltip }}">{{ r.snmp_badge_text }}</span>
-    </div>
+    <span class="badge badge-method {{ r.ssh_badge_cls }}" title="{{ r.ssh_badge_tooltip }}">{{ r.ssh_badge_text }}</span>
+    <span class="badge badge-method {{ r.snmp_badge_cls }}" title="{{ r.snmp_badge_tooltip }}">{{ r.snmp_badge_text }}</span>
   </td>
   <td class="text-nowrap">
     {# Edição em lote (ver setRowEditMode()/wireRow() em dashboard.html):
