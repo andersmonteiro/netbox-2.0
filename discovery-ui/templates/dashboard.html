@@ -112,6 +112,14 @@
   #devices-table > tbody > tr > td { padding-top: .65rem; padding-bottom: .65rem; }
 
   .proto-cell { white-space: nowrap; }
+
+  /* Estado "salvando" da linha inteira (ver saveRow()) -- some no
+     lugar de nada acontecer durante a checagem real de conectividade
+     (que pode levar alguns segundos, ver test_ssh_connectivity()/
+     test_snmp_connectivity() em discovery_core.py), pra ficar claro
+     que tá processando em vez de parecer que a tela travou/recarregou
+     do nada quando a linha troca de repente ao final. */
+  #devices-table > tbody > tr.nbo-row-saving { opacity: .5; pointer-events: none; transition: opacity .15s ease; }
 </style>
 <script>
 (function () {
@@ -218,6 +226,12 @@
     data.set('discovery_snmp_community', (communityEl.value || '').trim());
 
     saveError.style.display = 'none';
+    // Fica claramente "ocupada" (opacidade + sem clique, ver CSS
+    // .nbo-row-saving acima) durante a checagem real de conectividade
+    // -- pode levar alguns segundos, e sem esse aviso a troca repentina
+    // da linha no final parecia um travamento/recarregamento da tela.
+    var rowName = tr.dataset.name;
+    tr.classList.add('nbo-row-saving');
 
     fetch('/device/' + id + '/inline-update', {
       method: 'POST',
@@ -237,14 +251,19 @@
           // Status ("pronto"/"incompleto").
           return fetch('/device/' + id + '/row')
             .then(function (r) { return r.text(); })
-            .then(function (html) { replaceRow(tr, html); })
+            .then(function (html) {
+              replaceRow(tr, html);
+              if (window.nboToast) window.nboToast(rowName + ' atualizado.');
+            })
             .catch(function () { window.location.reload(); });
         } else {
+          tr.classList.remove('nbo-row-saving');
           saveError.textContent = 'Erro ao salvar ' + tr.dataset.name + ': ' + (res.body.error || 'falha desconhecida');
           saveError.style.display = '';
         }
       })
       .catch(function (err) {
+        tr.classList.remove('nbo-row-saving');
         saveError.textContent = 'Erro de rede ao salvar ' + tr.dataset.name + ': ' + err;
         saveError.style.display = '';
       });
