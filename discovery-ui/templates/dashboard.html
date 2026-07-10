@@ -37,13 +37,6 @@
         </select>
       </div>
       <div class="col-md">
-        <label class="form-label mb-1">Região</label>
-        <select id="f-region" class="form-select">
-          <option value="">Todas</option>
-          {% for reg in filter_regions %}<option value="{{ reg }}">{{ reg }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="col-md">
         <label class="form-label mb-1">Fabricante</label>
         <select id="f-manufacturer" class="form-select">
           <option value="">Todos</option>
@@ -75,7 +68,7 @@
             <th>Senha (SSH) <i class="ti ti-info-circle text-secondary" title="Senha de login SSH -- nunca é exibida, só substituída. Em MikroTik configurado como SNMP, é opcional"></i></th>
             <th>Porta SSH <i class="ti ti-info-circle text-secondary" title="Padrão 22 se deixar em branco"></i></th>
             <th>Community (SNMP) <i class="ti ti-info-circle text-secondary" title="Community string usada no SNMP (ex: public)"></i></th>
-            <th>Status <i class="ti ti-info-circle text-secondary" title="SSH e SNMP -- cinza enquanto não há credencial preenchida, verde quando testado e comunicável, vermelho quando testado e falhou (com o motivo direto no texto). Basta preencher usuário/senha/porta (SSH) e/ou community (SNMP) que o teste roda sozinho"></i></th>
+            <th>Status <i class="ti ti-info-circle text-secondary" title="SSH e SNMP -- cinza enquanto não há credencial preenchida, verde quando testado e comunicável, vermelho quando testado e falhou. Passe o mouse sobre o badge pra ver o motivo. Basta preencher usuário/senha/porta (SSH) e/ou community (SNMP) que o teste roda sozinho"></i></th>
             <th class="w-1">Ações</th>
           </tr>
         </thead>
@@ -140,7 +133,6 @@
   var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr.dev-row'));
   var search = document.getElementById('f-search');
   var fSite = document.getElementById('f-site');
-  var fRegion = document.getElementById('f-region');
   var fManufacturer = document.getElementById('f-manufacturer');
   var clearBtn = document.getElementById('f-clear');
   var selectAll = document.getElementById('select-all-cb');
@@ -149,13 +141,11 @@
   function applyFilters() {
     var q = search.value.trim().toLowerCase();
     var site = fSite.value;
-    var region = fRegion.value;
     var manufacturer = fManufacturer.value;
     rows.forEach(function (tr) {
       var matches =
         (!q || tr.dataset.name.indexOf(q) !== -1 || tr.dataset.ip.indexOf(q) !== -1) &&
         (!site || tr.dataset.site === site) &&
-        (!region || tr.dataset.region === region) &&
         (!manufacturer || tr.dataset.manufacturer === manufacturer);
       tr.style.display = matches ? '' : 'none';
     });
@@ -163,12 +153,10 @@
 
   search.addEventListener('input', applyFilters);
   fSite.addEventListener('change', applyFilters);
-  fRegion.addEventListener('change', applyFilters);
   fManufacturer.addEventListener('change', applyFilters);
   clearBtn.addEventListener('click', function () {
     search.value = '';
     fSite.value = '';
-    fRegion.value = '';
     fManufacturer.value = '';
     applyFilters();
   });
@@ -340,19 +328,6 @@
   }
 
   function wireRow(tr) {
-    var siteSelect = tr.querySelector('.f-site');
-    if (siteSelect) {
-      // Região não tem mais coluna visível (só o filtro no topo usa
-      // esse dado, ver applyFilters()) -- mantém data-region da linha
-      // atualizado ao trocar de Site em modo de edição, pra o filtro
-      // continuar funcionando certo pra essa linha mesmo antes de
-      // salvar/recarregar.
-      siteSelect.addEventListener('change', function () {
-        var opt = siteSelect.selectedOptions[0];
-        tr.dataset.region = (opt && opt.dataset.region) ? opt.dataset.region : '';
-      });
-    }
-
     var editBtn = tr.querySelector('.nbo-row-edit-btn');
     var saveBtn = tr.querySelector('.nbo-row-save-btn');
     var cancelBtn = tr.querySelector('.nbo-row-cancel-btn');

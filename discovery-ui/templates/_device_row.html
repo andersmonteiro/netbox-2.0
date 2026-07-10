@@ -11,7 +11,6 @@
   data-name="{{ r.name|lower }}"
   data-ip="{{ (r.primary_ip or '')|lower }}"
   data-site="{{ r.site }}"
-  data-region="{{ r.region }}"
   data-manufacturer="{{ r.manufacturer }}"
   data-device-type-model="{{ r.device_type_model }}"
 >
@@ -30,7 +29,7 @@
     <select class="edit-val form-select form-select-sm f-site" style="display:none">
       <option value="">— selecione —</option>
       {% for s in sites %}
-      <option value="{{ s.id }}" data-region="{{ s.region }}" {% if r.site_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+      <option value="{{ s.id }}" {% if r.site_id == s.id %}selected{% endif %}>{{ s.name }}</option>
       {% endfor %}
     </select>
   </td>
@@ -64,15 +63,15 @@
     <input type="text" class="edit-val form-control form-control-sm" value="{{ r.cf_snmp_community }}" style="display:none" autocomplete="off">
   </td>
   <td class="proto-cell">
-    {# Coluna Status mesclada com a antiga Conectividade: mostra SSH e
-       SNMP sempre, com o motivo do vermelho direto no texto do badge
-       (sem precisar passar o mouse pra entender) -- ver regras exatas
-       e mensagens em app.py:_build_row(). Detalhe técnico completo
-       (ex: mensagem de erro do teste real de conectividade) continua
-       disponível via tooltip no hover, quando existir. #}
+    {# Coluna Status mesclada com a antiga Conectividade: badges SSH e
+       SNMP sempre visíveis (mesmo texto/estilo de sempre), só a COR
+       muda (cinza sem credencial, verde testado ok, vermelho testado e
+       falhou) -- o motivo específico de estar vermelho/verde só
+       aparece ao passar o mouse (title), sem poluir a célula com texto
+       -- ver regras exatas e mensagens em app.py:_build_row(). #}
     <div class="d-flex flex-column gap-1">
-      <span class="badge {{ r.ssh_badge_cls }}" {% if r.ssh_badge_tooltip %}title="{{ r.ssh_badge_tooltip }}"{% endif %}>SSH: {{ r.ssh_badge_text }}</span>
-      <span class="badge {{ r.snmp_badge_cls }}" {% if r.snmp_badge_tooltip %}title="{{ r.snmp_badge_tooltip }}"{% endif %}>SNMP: {{ r.snmp_badge_text }}</span>
+      <span class="badge {{ r.ssh_badge_cls }}" title="{{ r.ssh_badge_tooltip }}">{{ r.ssh_badge_text }}</span>
+      <span class="badge {{ r.snmp_badge_cls }}" title="{{ r.snmp_badge_tooltip }}">{{ r.snmp_badge_text }}</span>
     </div>
   </td>
   <td class="text-nowrap">

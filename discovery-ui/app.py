@@ -523,9 +523,12 @@ def _build_row(d):
         elif method == "snmp":
             not_ready_reason = "Falta a community (SNMP)."
 
-    # Texto/cor do badge SSH e SNMP mostrados direto na coluna Status
-    # (que absorveu a antiga coluna Conectividade -- ver _device_row.html
-    # e a conversa que definiu essas mensagens exatas). Prioridade:
+    # Cor do badge SSH e SNMP mostrados direto na coluna Status (que
+    # absorveu a antiga coluna Conectividade -- ver _device_row.html).
+    # O badge em si continua só "SSH"/"SNMP" (igual sempre foi); o
+    # motivo de estar vermelho/verde some no title (tooltip, aparece só
+    # ao passar o mouse) -- ver conversa que definiu essas mensagens
+    # exatas. Prioridade pra decidir a cor e a mensagem:
     # 1) credencial incompleta (diz especificamente o que falta, sem
     #    nem tentar testar -- username primeiro, senha depois) --
     # 2) credencial completa e testada (ok/erro, ver
@@ -536,26 +539,30 @@ def _build_row(d):
     #    roda sozinho assim que os dois campos ficam completos, mas
     #    cobre o caso de dado criado por fora desse app, ex: script/CLI).
     if not cf.get("discovery_username"):
-        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-red-lt", "Sem usuário informado.", ""
+        ssh_badge_cls, ssh_reason, ssh_detail = "bg-red-lt", "Sem usuário informado.", ""
     elif not has_ssh_cred_pair:
-        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-red-lt", "Sem senha informada.", ""
+        ssh_badge_cls, ssh_reason, ssh_detail = "bg-red-lt", "Sem senha informada.", ""
     elif cf.get("discovery_ssh_status") == "ok":
-        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-success-lt", "SSH OK.", ""
+        ssh_badge_cls, ssh_reason, ssh_detail = "bg-success-lt", "SSH OK.", ""
     elif cf.get("discovery_ssh_status") == "error":
-        ssh_badge_cls, ssh_badge_text = "bg-red-lt", "Usuário/Senha inválidos."
-        ssh_badge_tooltip = cf.get("discovery_ssh_status_detail") or ""
+        ssh_badge_cls, ssh_reason = "bg-red-lt", "Usuário/Senha inválidos."
+        ssh_detail = cf.get("discovery_ssh_status_detail") or ""
     else:
-        ssh_badge_cls, ssh_badge_text, ssh_badge_tooltip = "bg-secondary-lt", "Aguardando teste.", ""
+        ssh_badge_cls, ssh_reason, ssh_detail = "bg-secondary-lt", "Aguardando teste.", ""
+    ssh_badge_text = "SSH"
+    ssh_badge_tooltip = f"{ssh_reason} ({ssh_detail})" if ssh_detail else ssh_reason
 
     if not cf.get("discovery_snmp_community"):
-        snmp_badge_cls, snmp_badge_text, snmp_badge_tooltip = "bg-red-lt", "Sem community", ""
+        snmp_badge_cls, snmp_reason, snmp_detail = "bg-red-lt", "Sem community", ""
     elif cf.get("discovery_snmp_status") == "ok":
-        snmp_badge_cls, snmp_badge_text, snmp_badge_tooltip = "bg-success-lt", "SNMP OK.", ""
+        snmp_badge_cls, snmp_reason, snmp_detail = "bg-success-lt", "SNMP OK.", ""
     elif cf.get("discovery_snmp_status") == "error":
-        snmp_badge_cls, snmp_badge_text = "bg-red-lt", "Sem resposta SNMP."
-        snmp_badge_tooltip = cf.get("discovery_snmp_status_detail") or ""
+        snmp_badge_cls, snmp_reason = "bg-red-lt", "Sem resposta SNMP."
+        snmp_detail = cf.get("discovery_snmp_status_detail") or ""
     else:
-        snmp_badge_cls, snmp_badge_text, snmp_badge_tooltip = "bg-secondary-lt", "Aguardando teste.", ""
+        snmp_badge_cls, snmp_reason, snmp_detail = "bg-secondary-lt", "Aguardando teste.", ""
+    snmp_badge_text = "SNMP"
+    snmp_badge_tooltip = f"{snmp_reason} ({snmp_detail})" if snmp_detail else snmp_reason
 
     return {
         "id": d.id,
@@ -624,13 +631,12 @@ def dashboard():
     pending_count = len(list(OUTPUT_DIR.glob("*.json"))) if OUTPUT_DIR.exists() else 0
 
     filter_sites = sorted({r["site"] for r in rows if r["site"]})
-    filter_regions = sorted({r["region"] for r in rows if r["region"]})
     filter_manufacturers = sorted({r["manufacturer"] for r in rows if r["manufacturer"]})
 
     return render_template(
         "dashboard.html", rows=rows, pending_count=pending_count, platforms=platforms,
         sites=sites, device_types=device_types,
-        filter_sites=filter_sites, filter_regions=filter_regions, filter_manufacturers=filter_manufacturers,
+        filter_sites=filter_sites, filter_manufacturers=filter_manufacturers,
     )
 
 
