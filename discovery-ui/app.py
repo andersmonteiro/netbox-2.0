@@ -59,12 +59,13 @@ SNMP_TIMEOUT = int(os.environ.get("SNMP_TIMEOUT", "5"))
 SNMP_RETRIES = int(os.environ.get("SNMP_RETRIES", "1"))
 # Filtro de nome usado pela aba "Serviços" (status/reinício de containers,
 # ver _list_service_containers()/_get_docker_client() mais abaixo) --
-# só entram containers cujo nome CONTÉM esse texto (case-insensitive).
-# "netbox" cobre tanto a instalação completa (netbox, netbox-worker,
-# postgres, redis, redis-cache -- nomeados "netbox-docker-<serviço>-N"
-# pelo Compose) quanto o container do próprio netbox-oracle. Vazio
-# ("") mostraria TODOS os containers do host, não só os do NetBox.
-SERVICE_NAME_FILTER = os.environ.get("ORACLE_SERVICE_FILTER", "netbox")
+# lista separada por vírgula; entra qualquer container cujo nome CONTÉM
+# ao menos UM desses termos (case-insensitive). Postgres/Redis não têm
+# "netbox" no nome (container_name explícito no compose, ou nome dado
+# por outro projeto Compose que sobe o NetBox em si -- ver
+# _SERVICE_LABEL_RULES logo abaixo), por isso entram como termos
+# separados. Vazio ("") mostraria TODOS os containers do host.
+SERVICE_NAME_FILTER = os.environ.get("ORACLE_SERVICE_FILTER", "netbox,redis,postgres")
 
 OUTPUT_DIR = Path(__file__).parent / "discovery_output"
 APPLIED_DIR = OUTPUT_DIR / "applied"
@@ -309,9 +310,44 @@ def _get_docker_client():
     return client
 
 
+def _service_filter_terms():
+    return [t.strip().lower() for t in SERVICE_NAME_FILTER.split(",") if t.strip()]
+
+
 def _in_service_scope(name):
-    needle = SERVICE_NAME_FILTER.strip().lower()
-    return (not needle) or (needle in name.lower())
+    terms = _service_filter_terms()
+    low = name.lower()
+    return (not terms) or any(t in low for t in terms)
+
+
+# Nome "cru" do container (o que o Docker/Compose deu -- geralmente
+# "<projeto>-<serviço>-<N>", ex: "natverk-docker-netbox-housekeeping-1",
+# ou o container_name explícito tipo "netbox-oracle"/"postgres") pra um
+# rótulo curto e consistente na UI, independente de qual projeto Compose
+# subiu o NetBox (o nome do projeto varia por instalação -- "natverk-
+# docker", "netbox-docker", o que o operador chamou a pasta). Ordem
+# importa: checa os termos mais específicos ("netbox-housekeeping")
+# antes dos genéricos ("netbox"), senão "netbox" bate primeiro e
+# "netbox-housekeeping"/"netbox-worker"/"netbox-oracle" nunca são
+# alcançados. Container que não bate com nenhuma regra mantém o nome
+# cru (fallback -- não esconde nada, só não fica "bonito").
+_SERVICE_LABEL_RULES = (
+    ("netbox-housekeeping", "netbox-housekeeping"),
+    ("netbox-worker", "netbox-worker"),
+    ("netbox-oracle", "netbox-oracle"),
+    ("redis-cache", "netbox-redis-cache"),
+    ("postgres", "netbox-postgres"),
+    ("redis", "netbox-redis"),
+    ("netbox", "netbox"),
+)
+
+
+def _service_label(raw_name):
+    low = raw_name.lower()
+    for term, label in _SERVICE_LABEL_RULES:
+        if term in low:
+            return label
+    return raw_name
 
 
 def _list_service_containers():
@@ -322,8 +358,8 @@ def _list_service_containers():
     for c in client.containers.list(all=True):
         if not _in_service_scope(c.name):
             continue
-        containers.append({"name": c.name, "status": c.status})
-    containers.sort(key=lambda x: x["name"])
+        containers.append({"name": c.name, "label": _service_label(c.name), "status": c.status})
+    containers.sort(key=lambda x: x["label"])
     return containers
 
 
