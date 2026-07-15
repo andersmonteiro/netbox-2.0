@@ -448,6 +448,9 @@
               <i class="ti ti-chevron-down ms-1 text-secondary" style="font-size: .8rem; vertical-align:middle;"></i>
             </a>
             <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+              {% if session.get('is_admin') %}
+              <a href="{{ url_for('users_view') }}" class="dropdown-item"><i class="ti ti-users me-2"></i>Usuários</a>
+              {% endif %}
               <a href="{{ url_for('change_password') }}" class="dropdown-item"><i class="ti ti-key me-2"></i>Alterar senha</a>
               <a href="{{ url_for('logout') }}" class="dropdown-item"><i class="ti ti-logout me-2"></i>Sair</a>
             </div>

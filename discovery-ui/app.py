@@ -29,6 +29,7 @@ DISCOVERY_UI_PASSWORD, FLASK_SECRET_KEY, SNMP_TIMEOUT, SNMP_RETRIES
 
 import json
 import os
+import secrets
 import sys
 import threading
 from datetime import datetime, timezone
@@ -117,17 +118,97 @@ def save_settings(**fields):
     SETTINGS_PATH.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def check_ui_password(password):
-    """Confere a senha de login. Se o operador já trocou a senha pela
-    tela 'Alterar senha', usa o hash salvo em settings.json; senão cai
-    pro DISCOVERY_UI_PASSWORD do .env (senha padrão definida na
-    instalação) -- assim a troca de senha funciona sem precisar mexer
-    no .env nem reiniciar o container, mesmo padrão já usado pra URL/
-    token do NetBox (ver load_settings/save_settings acima)."""
-    stored_hash = load_settings().get("ui_password_hash")
-    if stored_hash:
-        return check_password_hash(stored_hash, password)
-    return bool(password) and bool(UI_PASSWORD) and password == UI_PASSWORD
+# --------------------------------------------------------------------
+# usuários (multiusuário -- substitui o antigo login único admin/
+# DISCOVERY_UI_PASSWORD, que vivia só em UI_USER/UI_PASSWORD/
+# settings.json.ui_password_hash acima). Guardado num JSON próprio (
+# mesmo padrão de settings.json -- sem banco de dados aqui, é só uma
+# lista pequena de usuários internos da equipe, não precisa de mais
+# que isso) pra não misturar com a config da API/senha antiga.
+# --------------------------------------------------------------------
+USERS_PATH = OUTPUT_DIR / "_oracle" / "users.json"
+
+
+def _seed_default_admin():
+    """Primeira execução (users.json ainda não existe): cria o usuário
+    admin inicial a partir do que já estava configurado no modelo
+    antigo -- se o operador já tinha trocado a senha pela tela 'Alterar
+    senha' (settings.json.ui_password_hash), reaproveita esse hash;
+    senão usa o DISCOVERY_UI_PASSWORD do .env (senha gerada pelo
+    bootstrap.sh na instalação). Assim a migração pra multiusuário não
+    invalida a senha que a equipe já estava usando -- ninguém fica
+    trancado de fora no primeiro deploy dessa mudança."""
+    legacy_hash = load_settings().get("ui_password_hash")
+    if legacy_hash:
+        password_hash = legacy_hash
+    elif UI_PASSWORD:
+        password_hash = generate_password_hash(UI_PASSWORD)
+    else:
+        # Nem senha trocada nem DISCOVERY_UI_PASSWORD no .env (não
+        # deveria acontecer numa instalação normal, o bootstrap.sh
+        # sempre gera uma) -- gera uma aleatória em vez de deixar o
+        # usuário admin sem senha nenhuma (login impossível == mais
+        # seguro que login sem senha).
+        password_hash = generate_password_hash(secrets.token_urlsafe(18))
+    return [{
+        "id": 1,
+        "name": "Administrador",
+        "username": UI_USER.strip().lower() or "admin",
+        "password_hash": password_hash,
+        "is_admin": True,
+        "active": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }]
+
+
+def load_users():
+    if USERS_PATH.exists():
+        try:
+            return json.loads(USERS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    users = _seed_default_admin()
+    save_users(users)
+    return users
+
+
+def save_users(users):
+    USERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    USERS_PATH.write_text(json.dumps(users, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def find_user_by_username(username):
+    username = (username or "").strip().lower()
+    if not username:
+        return None
+    for u in load_users():
+        if u.get("username", "").lower() == username:
+            return u
+    return None
+
+
+def find_user_by_id(user_id):
+    for u in load_users():
+        if u.get("id") == user_id:
+            return u
+    return None
+
+
+def next_user_id(users):
+    return (max((u.get("id", 0) for u in users), default=0)) + 1
+
+
+def authenticate_user(username, password):
+    """Retorna o dict do usuário se username+senha baterem E a conta
+    estiver ativa (ver toggle-active em /users -- desativar em vez de
+    excluir é o jeito de "suspender" alguém sem perder o histórico/
+    liberar o username de novo), senão None."""
+    user = find_user_by_username(username)
+    if not user or not user.get("active", True):
+        return None
+    if not password or not check_password_hash(user.get("password_hash", ""), password):
+        return None
+    return user
 
 
 def get_nb():
@@ -160,11 +241,28 @@ def login_required(view):
     return wrapped
 
 
+def admin_required(view):
+    """Como login_required, mas exige session['is_admin'] -- usado só
+    nas rotas de /users (gestão de contas). Um usuário comum logado que
+    tentar acessar direto pela URL cai de volta no dashboard com um
+    aviso, em vez de erro 403 cru."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        if not session.get("is_admin"):
+            flash("Essa área é restrita a administradores.", "error")
+            return redirect(url_for("dashboard"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
 # Rotas que não dependem do NetBox estar configurado (senão a gente
 # criaria um loop de redirect pra /settings).
 _NETBOX_INDEPENDENT_ENDPOINTS = {
     "login", "logout", "settings_view", "api_status", "change_password", "static",
     "services_status", "service_restart",
+    "users_view", "user_create", "user_toggle_active", "user_delete", "user_reset_password",
 }
 
 
@@ -189,9 +287,12 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if username == UI_USER and password and check_ui_password(password):
+        user = authenticate_user(username, password)
+        if user:
             session["logged_in"] = True
-            session["username"] = username
+            session["user_id"] = user["id"]
+            session["username"] = user["username"]
+            session["is_admin"] = bool(user.get("is_admin"))
             return redirect(request.args.get("next") or url_for("dashboard"))
         flash("Usuário ou senha incorretos.", "error")
     return render_template("login.html")
@@ -242,17 +343,151 @@ def change_password():
         current_password = request.form.get("current_password", "")
         new_password = request.form.get("new_password", "")
         confirm_password = request.form.get("confirm_password", "")
-        if not check_ui_password(current_password):
+        # Busca o usuário LOGADO (não mais um hash global único) --
+        # cada conta troca só a própria senha, ver users.json/
+        # authenticate_user() acima.
+        me = find_user_by_id(session.get("user_id"))
+        if not me or not check_password_hash(me.get("password_hash", ""), current_password):
             flash("Senha atual incorreta.", "error")
         elif len(new_password) < 6:
             flash("A nova senha precisa ter pelo menos 6 caracteres.", "error")
         elif new_password != confirm_password:
             flash("A confirmação não bate com a nova senha.", "error")
         else:
-            save_settings(ui_password_hash=generate_password_hash(new_password))
+            users = load_users()
+            for u in users:
+                if u.get("id") == me["id"]:
+                    u["password_hash"] = generate_password_hash(new_password)
+            save_users(users)
             flash("Senha alterada com sucesso.", "success")
             return redirect(url_for("change_password"))
     return render_template("change_password.html")
+
+
+# --------------------------------------------------------------------
+# usuários (só admin) -- criar/ativar-desativar/excluir/resetar senha.
+# Sem autocadastro nem e-mail (decisão explícita do cliente): só quem
+# já é admin consegue abrir uma conta nova pra alguém, direto por
+# aqui.
+# --------------------------------------------------------------------
+
+def _count_other_active_admins(users, exclude_id):
+    """Quantos admins ATIVOS existem além do usuário 'exclude_id' --
+    usado pra bloquear ações (excluir/desativar/tirar admin) que
+    deixariam o sistema sem NENHUM admin ativo pra gerenciar contas
+    depois (ninguém mais conseguiria abrir usuário novo nem readmitir
+    alguém)."""
+    return sum(1 for u in users if u.get("is_admin") and u.get("active", True) and u.get("id") != exclude_id)
+
+
+@app.route("/users")
+@admin_required
+def users_view():
+    users = sorted(load_users(), key=lambda u: u.get("id", 0))
+    return render_template("users.html", users=users, my_id=session.get("user_id"))
+
+
+@app.route("/users/new", methods=["POST"])
+@admin_required
+def user_create():
+    name = request.form.get("name", "").strip()
+    username = request.form.get("username", "").strip().lower()
+    password = request.form.get("password", "")
+    confirm_password = request.form.get("confirm_password", "")
+    is_admin = bool(request.form.get("is_admin"))
+
+    if not name:
+        flash("Informe o nome da pessoa.", "error")
+    elif not username:
+        flash("Informe um usuário (login) pra essa conta.", "error")
+    elif find_user_by_username(username):
+        flash(f"Já existe um usuário com o login '{username}'.", "error")
+    elif len(password) < 6:
+        flash("A senha precisa ter pelo menos 6 caracteres.", "error")
+    elif password != confirm_password:
+        flash("A confirmação não bate com a senha.", "error")
+    else:
+        users = load_users()
+        users.append({
+            "id": next_user_id(users),
+            "name": name,
+            "username": username,
+            "password_hash": generate_password_hash(password),
+            "is_admin": is_admin,
+            "active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        save_users(users)
+        flash(f"Usuário '{username}' criado com sucesso.", "success")
+        return redirect(url_for("users_view"))
+    return redirect(url_for("users_view"))
+
+
+@app.route("/users/<int:user_id>/toggle-active", methods=["POST"])
+@admin_required
+def user_toggle_active(user_id):
+    if user_id == session.get("user_id"):
+        flash("Você não pode desativar a própria conta.", "error")
+        return redirect(url_for("users_view"))
+
+    users = load_users()
+    target = next((u for u in users if u.get("id") == user_id), None)
+    if not target:
+        flash("Usuário não encontrado.", "error")
+        return redirect(url_for("users_view"))
+
+    turning_inactive = target.get("active", True)
+    if turning_inactive and target.get("is_admin") and _count_other_active_admins(users, user_id) == 0:
+        flash("Esse é o único admin ativo -- promova outro usuário a admin antes de desativar esse.", "error")
+        return redirect(url_for("users_view"))
+
+    target["active"] = not turning_inactive
+    save_users(users)
+    flash(f"Usuário '{target['username']}' {'desativado' if target['active'] is False else 'reativado'}.", "success")
+    return redirect(url_for("users_view"))
+
+
+@app.route("/users/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def user_delete(user_id):
+    if user_id == session.get("user_id"):
+        flash("Você não pode excluir a própria conta.", "error")
+        return redirect(url_for("users_view"))
+
+    users = load_users()
+    target = next((u for u in users if u.get("id") == user_id), None)
+    if not target:
+        flash("Usuário não encontrado.", "error")
+        return redirect(url_for("users_view"))
+
+    if target.get("is_admin") and _count_other_active_admins(users, user_id) == 0:
+        flash("Esse é o único admin ativo -- promova outro usuário a admin antes de excluir esse.", "error")
+        return redirect(url_for("users_view"))
+
+    users = [u for u in users if u.get("id") != user_id]
+    save_users(users)
+    flash(f"Usuário '{target['username']}' excluído.", "success")
+    return redirect(url_for("users_view"))
+
+
+@app.route("/users/<int:user_id>/reset-password", methods=["POST"])
+@admin_required
+def user_reset_password(user_id):
+    """Admin define uma senha nova pra OUTRA conta (ex: pessoa esqueceu
+    a senha e não tem e-mail de recuperação nesse sistema -- ver
+    decisão de não ter fluxo de e-mail)."""
+    new_password = request.form.get("new_password", "")
+    users = load_users()
+    target = next((u for u in users if u.get("id") == user_id), None)
+    if not target:
+        flash("Usuário não encontrado.", "error")
+    elif len(new_password) < 6:
+        flash("A nova senha precisa ter pelo menos 6 caracteres.", "error")
+    else:
+        target["password_hash"] = generate_password_hash(new_password)
+        save_users(users)
+        flash(f"Senha de '{target['username']}' redefinida.", "success")
+    return redirect(url_for("users_view"))
 
 
 @app.route("/api/status")
